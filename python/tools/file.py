@@ -1,4 +1,6 @@
+import sys
 import os
+sys.path.append(os.path.abspath('../'))
 from typing import List
 import numpy as np
 import torch

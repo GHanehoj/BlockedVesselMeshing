@@ -1,7 +1,7 @@
 import numpy as np
 from skimage.measure import marching_cubes
 from convolution import conv_surf
-from tools.smoothing import smooth_taubin
+from tools.contouring import smooth_taubin
 from tools.mesh_util import TriMesh
 from tools.pyvista_plotting import show_tri_mesh
 
