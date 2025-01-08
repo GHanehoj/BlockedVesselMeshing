@@ -118,7 +118,7 @@ def cross(a, b):
 
 
 def unit(a):
-    return a / np.linalg.norm(a)
+    return a / np.linalg.norm(a, axis=-1)[...,None]
 
 def norm(a):                 #pragma: no cover
     return np.linalg.norm(a) #pragma: no cover 
