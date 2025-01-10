@@ -1,1 +1,3 @@
 __pycache__/
+data/trees/reg[0-9]*
+_skipped.*
