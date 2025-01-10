@@ -194,9 +194,12 @@ def prod(Qa, Qb):
 
 
 def rotate(q, r):
-    qr = from_array([0.0, r[0], r[1], r[2]])
-    return prod(prod(q, qr), conjugate(q))[1:]
-
+    if r.ndim == 1:
+        qr = from_array([0.0, r[0], r[1], r[2]])
+        return prod(prod(q, qr), conjugate(q))[1:]
+    else:
+        qrs = np.concatenate((np.zeros((len(r), 1)), r), axis=1)
+        return prod_array(prod_array(q, qrs), conjugate(q))[:, 1:]
 
 def prod_array(Qa, Qb):
     """
@@ -239,15 +242,6 @@ def prod_array(Qa, Qb):
         )
 
     raise ValueError("Either one or both of the arguments has to be a quaternion array")
-
-
-def rotate_array(q, rs):
-    conjugated = conjugate(q)
-    qrs = np.concatenate((np.zeros((len(rs), 1)), rs), axis=1)
-    inner = prod_array(q, qrs)
-    outer = prod_array(inner, conjugated)
-
-    return outer[:, 1:]
 
 
 def to_angle_axis(Q):

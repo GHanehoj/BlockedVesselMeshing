@@ -64,7 +64,7 @@ def biharmonic_templating(t, arm_dir):
         v_bc[bi] = v[b[bi]]
         if s[b[bi]] == 1: # Move handle 1 over
             Q = QUAT.R_vector_to_vector(V_proto[2], arm_dir)
-            u_bc[bi] = QUAT.rotate_array(Q, v[b[bi]])
+            u_bc[bi] = QUAT.rotate(Q, v[b[bi]])
         else: # Move other handles forward
             u_bc[bi] = v[b[bi]]
 
@@ -94,7 +94,7 @@ def arap_templating(t, arm_dir):
         bc[i] = v[b[i]]
         if s[b[i]] == 1:
             Q = QUAT.R_vector_to_vector(V_proto[2], arm_dir)
-            bc[i] = QUAT.rotate_array(Q, v[b[i]])
+            bc[i] = QUAT.rotate(Q, v[b[i]])
     vn = arap.solve(bc, v)
     return TetMesh(vn,f), s
 

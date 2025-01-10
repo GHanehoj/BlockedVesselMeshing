@@ -41,10 +41,10 @@ class FullBranch:
 
 
     def normalize(self, v):
-        return QUAT.rotate_array(self.R, v + self.T) * self.S
+        return QUAT.rotate(self.R, v + self.T) * self.S
 
     def denormalize(self, v):
-        return QUAT.rotate_array(QUAT.conjugate(self.R), v / self.S) - self.T
+        return QUAT.rotate(QUAT.conjugate(self.R), v / self.S) - self.T
 
     def get_hyperparams(self):
         v_i = self.norm_positions[2]
@@ -110,10 +110,10 @@ class CloseBranch:
 
 
     def normalize(self, v):
-        return QUAT.rotate_array(self.R, v + self.T) * self.S
+        return QUAT.rotate(self.R, v + self.T) * self.S
 
     def denormalize(self, v):
-        return QUAT.rotate_array(QUAT.conjugate(self.R), v / self.S) - self.T
+        return QUAT.rotate(QUAT.conjugate(self.R), v / self.S) - self.T
 
     def get_hyperparams(self):
         v_i = self.norm_positions[2]
