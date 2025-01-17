@@ -1,20 +1,36 @@
-import numpy as np
-from skimage.measure import marching_cubes
-from convolution import conv_surf
-from tools.contouring import smooth_taubin
-from tools.mesh_util import TriMesh
-from tools.pyvista_plotting import show_tri_mesh
+import data as DATA
+import tree as TREE
+import clusters as CLUSTERS
+import full_generation as GEN
+from tools.pyvista_plotting import show_tet_mesh
+from tools.mesh_util import TetMesh
+from tqdm import tqdm
+_MAX_DEPTH = 10
+# _done_cnt = 0
 
-V = np.array([[0.0, 0, -20], [0, 0, 0], [10, 0, 20], [-5, 20, 30]])
-E = np.array([[0,1], [1,2], [1,3]])
-R = np.array([4, 2, 0.6, 1])
+tree_folder = f"../data/trees/__reg500"
+V, E, R = DATA.load_skeleton_data(tree_folder)
+root, _ = TREE.make_tree(V, E, R)
+root.position += 2*(root.position - root.children[0].position)
 
-grid = conv_surf(V, E, R)
+root_cluster = CLUSTERS.make_cluster(root.children[0])
+total_cnt = CLUSTERS._cnt(root_cluster, 0, _MAX_DEPTH)
 
-verts, faces, normals, values = marching_cubes(grid.values, 0)
+pbar = tqdm(total=total_cnt)
+def done_f():
+    pbar.update(1)
+    # global _done_cnt
+    # _done_cnt += 1
+    # if _done_cnt % 100 == 0:
+    #     print(f"Done: {_done_cnt}/{total_cnt}")
 
-verts2 = smooth_taubin(verts, faces)
+res = GEN.gen_tree_clustered(root_cluster, done_f, _MAX_DEPTH)
 
-mesh = TriMesh(verts2, faces)
-show_tri_mesh(mesh)
-a = 2
+tet = TetMesh(res.nodes, res.tets)
+
+
+print(tet.size(), "MB")
+tet.save("out.vtk")
+tet.save("out.mesh")
+show_tet_mesh(tet)
+
