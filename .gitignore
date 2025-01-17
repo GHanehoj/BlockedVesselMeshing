@@ -1,3 +1,11 @@
 __pycache__/
-data/trees/reg[0-9]*
+data/trees/*
+!data/trees/orig
+!data/trees/split
+!data/trees/arterial
+!data/trees/regDone
 _skipped.*
+*.png
+*.ini
+*.mesh
+*.vtk
