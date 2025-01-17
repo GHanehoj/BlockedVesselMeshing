@@ -1,8 +1,6 @@
 import numpy as np
 import rainbow.math.matrix3 as M3
 import rainbow.math.vector3 as V3
-# import rainbow.math.angle as ANGLE
-# import rainbow.util.parse_string as parse
 from math import cos, sin, sqrt, pi, atan2, acos
 
 def make(qs, qx, qy, qz):
@@ -10,60 +8,6 @@ def make(qs, qx, qy, qz):
 
 def from_array(data):
     return np.array(data[0:4], dtype=np.float64)
-
-# def check_string(lower_value):
-#     """
-#         Parsing a string. The function returns true if the given
-#         input string follows one of the above templates
-
-#         :param: A text string, that consist of valid oprations.
-#         :return: A boolean telling if the string is valid.
-#     """
-#     if   parse.parse_string_to_rotation_check(lower_value):
-#         return True
-#     elif parse.parse_string_to_array_check(lower_value):
-#         return True
-#     elif parse.parse_string_to_ru_check(lower_value):
-#         return True
-#     return parse.parse_string_to_keywords_check(lower_value)
-
-# def from_string(value):
-
-#     value_lower = value.lower()
-
-#     assert check_string(value_lower)
-
-#     if value_lower == "identity":
-#         return identity()
-
-#     if value_lower.startswith("rx:"):
-#         degrees = float(value_lower.strip("rx:"))
-#         radians = ANGLE.degrees_to_radians(degrees)
-#         return Rx(radians)
-
-#     if value_lower.startswith("ry:"):
-#         degrees = float(value_lower.strip("ry:"))
-#         radians = ANGLE.degrees_to_radians(degrees)
-#         return Ry(radians)
-
-#     if value_lower.startswith("rz:"):
-#         degrees = float(value_lower.strip("rz:"))
-#         radians = ANGLE.degrees_to_radians(degrees)
-#         return Rz(radians)
-
-#     if value_lower.startswith("ru:"):
-#         (degrees_str, axis_str) = value_lower.strip("ru:").split(":")
-#         degrees = float(degrees_str)
-#         radians = ANGLE.degrees_to_radians(degrees)
-#         axis = V3.from_string(axis_str)
-#         return Ru(radians, axis)
-
-#     string_2_array =  np.fromstring(value_lower.strip("[]"), dtype=np.float64, sep=",")
-
-#     assert len(string_2_array) >= 4
-
-#     return string_2_array[:4]
-
 
 def from_vector3(w):
     return np.array([0, w[0], w[1], w[2]], dtype=np.float64)

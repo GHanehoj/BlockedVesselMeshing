@@ -3,7 +3,6 @@ import os
 sys.path.append(os.path.abspath('../'))
 from typing import List
 import numpy as np
-import torch
 
 def create_folders_if_not_exist(filepath: str) -> None:
     # Extract directory path from the given file path
@@ -29,10 +28,6 @@ def file_exists(filename):
 def save_npy(file, npy):
     create_folders_if_not_exist(file)
     np.save(file, npy)
-
-def save_net(file, net):
-    create_folders_if_not_exist(file)
-    torch.save(net.state_dict(), file)
 
 def save_skeleton_data(V, E, R, vertex_array_file: str, edge_array_file: str, vertex_radius_file: str):
     create_folders_if_not_exist(vertex_array_file)

@@ -1,7 +1,5 @@
 import numpy as np
-from collections import namedtuple
-TreeConf = namedtuple("TreeConf", ["id", "close"])
-def tree_conf_name(tree_conf): return f"{tree_conf.id}-" + ("close" if tree_conf.close else "full")
+
 class TreeNode:
     """
     This class represents a skeleton node of a renal aerial vascular
@@ -54,18 +52,3 @@ def make_arrays(nodes):
 
     E = np.array(E)
     return V, E, R
-
-def get_nodes_to_depth(nodes, max_depth):
-    return get_nodes_to_depth_from_node(nodes[1], max_depth)
-
-def get_nodes_to_depth_from_node(node, max_depth):
-    res = []
-    todo = [(node, 0)]
-    while len(todo) != 0:
-        node, depth = todo.pop()
-        if depth > max_depth or len(node.children) != 2: continue
-        res.append(node)
-        for child in node.children:
-            todo.append((child, depth+1))
-
-    return res

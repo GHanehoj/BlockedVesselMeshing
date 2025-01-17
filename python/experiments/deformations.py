@@ -4,11 +4,8 @@ sys.path.append(os.path.abspath('../'))
 import numpy as np
 import convolution as CONV
 from tools.contouring import contour
-import branch as BRANCH
-from tree import TreeConf
 import rainbow.math.quaternion as QUAT
 import rainbow.math.vector3 as VEC
-import rainbow.math.angle as ANG
 import tetgen
 import igl
 import pyvista as pv

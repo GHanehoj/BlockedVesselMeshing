@@ -4,6 +4,7 @@ data/trees/*
 !data/trees/split
 !data/trees/arterial
 !data/trees/regDone
+python/attic
 _skipped.*
 *.png
 *.ini

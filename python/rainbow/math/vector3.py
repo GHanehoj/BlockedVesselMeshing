@@ -1,6 +1,4 @@
 import numpy as np
-# import rainbow.util.parse_string as parse
-
 
 def zero():
     return np.zeros((3,), dtype=np.float64)
@@ -16,48 +14,6 @@ def make(x, y, z):
 
 def make_vec4(x, y, z, w):
     return np.array([x, y, z, w], dtype=np.float64)
-
-# def check_string(lower_value):
-#     """
-#         Parsing a string. The function returns true if the given
-#         input string follows one of the above templates
-
-#         :param: A text string, that consist of valid oprations.
-#         :return: A boolean telling if the string is valid.
-#     """
-#     if parse.parse_string_to_array_check(lower_value):
-#         return True
-#     return parse.parse_string_to_random_range_check(lower_value)
-
-# def from_string(value):
-#     value_lower = value.lower()
-
-#     if value_lower == "ones":
-#         return ones()
-
-#     if value_lower == "zero":
-#         return zero()
-
-#     if value_lower == "i":
-#         return i()
-
-#     if value_lower == "j":
-#         return j()
-
-#     if value_lower == "k":
-#         return k()
-
-#     assert check_string(value_lower)
-
-#     if value_lower.startswith("rand:"):
-#         (lower_str, upper_str) = value_lower.strip("rand:").split(":")
-#         return rand(float(lower_str), float(upper_str))
-    
-#     string_2_array =  np.fromstring(value_lower.strip("[]"), dtype=np.float64, sep=",")
-
-#     assert len(string_2_array) >= 3
-
-#     return string_2_array[:3]
 
 
 def i():
@@ -155,11 +111,7 @@ def less(a, b):
     # We know now that a0==b0 and a1==b1 and a2==b2
     return False
 
-'''
-    Spelling error? 
-    greather or greater
-'''
-def greather(a, b):
+def greater(a, b):
     if a[0] > b[0]:
         return True
     if a[0] < b[0]:
@@ -179,8 +131,8 @@ def greather(a, b):
 
 
 def less_than_equal(a, b):
-    return not greather(a, b)
+    return not greater(a, b)
 
 
-def greather_than_equal(a, b):
+def greater_than_equal(a, b):
     return not less(a, b)

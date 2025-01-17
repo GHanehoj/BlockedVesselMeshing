@@ -1,18 +1,18 @@
 import sys
 import os
 sys.path.append(os.path.abspath('../'))
+import numpy as np
 from skimage.measure import marching_cubes
-from tools.mesh_util import TriMesh, calc_neigbours_tri
-from tools.smoothing import taubin_smoothing
+from tools.mesh_util import TriMesh
+from tools.smoothing import taubin_smoothing_nomask
 import convolution as CONV
 
-def branch_contour(branch):
-    V, E, R = branch.create_local_graph()
-    grid = CONV.conv_surf(V, E, R)
+def cluster_contour(cluster, res):
+    dx = cluster.calc_dx(res)
+    sz = 2/np.median(cluster.R)
+    grid = CONV.conv_surf(cluster.V*sz, cluster.E, cluster.R*sz, dx*sz)
     verts, tris = contour(grid)
-
-    verts = branch.denormalize(verts)
-
+    verts /= sz
     return verts, tris
 
 def contour(grid):
@@ -20,7 +20,7 @@ def contour(grid):
     verts += grid.min
     verts *= grid.dx
 
-    neighbours = calc_neigbours_tri(TriMesh(verts, tris))
-    taubin_smoothing(verts, neighbours)
+    neighbours = TriMesh(verts, tris).calc_neighbours()
+    taubin_smoothing_nomask(verts, neighbours, iter=20)
 
     return verts, tris
