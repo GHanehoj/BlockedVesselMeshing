@@ -4,11 +4,11 @@ import rainbow.math.quaternion as QUAT
 import rainbow.math.intersection as INSCT
 import rainbow.math.vector3 as VEC
 from tools.mesh_util import SegMesh, TriMesh, TetMesh
+from clusters import FlowData
 from tools.contouring import cluster_contour
-from tools.numpy_util import ang_mod, angle_in_plane, angle_xy, lerp, mk_mask
-from tools.smoothing import laplacian_smoothing
+from tools.numpy_util import ang_mod, angle_in_plane, angle_xy, lerp
 from collections import namedtuple
-EndSlice = namedtuple("EndSlice", ["end", "edge", "point", "dir", "radius"])
+EndSlice = namedtuple("EndSlice", ["end", "edge", "flow_data"])
 
 tet_tris = np.array([[0,1,2], [1,2,3], [0,2,3], [0,1,3]])
 tet_other_tris = np.array([
@@ -26,33 +26,33 @@ def proj_to_plane(p, flow_data):
     proj = p0 - dist[..., :, None]*flow_data.dir[..., None, :]
     return dist, proj
 
-def extract_slice(nodes, cells, flow_data):
-    plane_dist, plane_proj = proj_to_plane(nodes, flow_data)
-    b1, b2, _ = VEC.make_orthonormal_vectors(flow_data.dir)
-    nodes_mask = plane_dist > 0
-    cells_mask = np.any(cells[:,:,None] == np.where(nodes_mask)[0], axis=2)
 
-    single_pruned_cells = (np.sum(cells_mask, axis=1) == 1)
-    tris = np.sort(cells[single_pruned_cells][~cells_mask[single_pruned_cells]].reshape(-1, 3), axis=1)
-    
-    beyond_idx = cells[single_pruned_cells][cells_mask[single_pruned_cells]]
-    normals = calc_normal_towards(nodes[tris], nodes[beyond_idx])
+def process_end(mesh: TetMesh, flow_data: FlowData):
+    plane_dist, plane_proj = proj_to_plane(mesh.nodes, flow_data)
+    b1, b2, _ = VEC.make_orthonormal_vectors(flow_data.dir)
+    nodes2d = np.stack((np.dot(mesh.nodes, b1), np.dot(mesh.nodes, b2)), axis=-1)
+
+    beyond_mask = plane_dist > 0
+    close_mask = np.logical_and(plane_dist < 1.5*flow_data.cut_dist, np.linalg.norm(plane_proj, axis=1) < 1.5*flow_data.radius)
+
+    cells_beyond = np.isin(mesh.tets, np.where(beyond_mask)[0])
+    cells_close = np.all(np.isin(mesh.tets, np.where(close_mask)[0]), axis=1)
+    cell_stat = np.sum(cells_beyond, axis=1)
+
+    crossing_mask = np.logical_and(cell_stat == 1, cells_close)
+    to_remove_mask = np.logical_and(cell_stat != 0, cells_close)
+
+    tris = np.sort(mesh.tets[crossing_mask][~cells_beyond[crossing_mask]].reshape(-1,3), axis=1)
+    crossed_idxs = mesh.tets[crossing_mask][ cells_beyond[crossing_mask]]
+
+    normals = calc_normal_towards(mesh.nodes[tris], mesh.nodes[crossed_idxs])
+    all_tet_tris = np.sort(mesh.tets[:, tet_tris], axis=2)
 
     tris, normals = remove_duplicate_tris(tris, normals)
-
-    close_mask = np.max(np.linalg.norm(plane_proj[tris], axis=2), axis=1) < 1.5*flow_data.radius
-    tris = tris[close_mask]
-    normals = normals[close_mask]
-
-    all_tet_tris = np.sort(cells[:, tet_tris], axis=2)
-
     tris, normals = remove_surface_tris(all_tet_tris, tris, normals)
     tris, normals = trim_disconnected(tris, normals)
 
-    removed_tets = []
-
-
-    overlap_idxs = calc_overlaps(nodes, b1, b2, tris)
+    overlap_idxs = calc_overlaps(nodes2d, tris)
     i = 0
     while len(overlap_idxs) > 0:
         i += 1
@@ -64,13 +64,13 @@ def extract_slice(nodes, cells, flow_data):
         tet_idxs, ks = np.where(np.all(all_tet_tris == to_remove_tri[None, None, :], axis=2))
         assert(len(tet_idxs) == 2)
 
-        tet_top_dot_normal = np.dot(nodes[cells[tet_idxs, tet_tops[ks]]]-nodes[to_remove_tri[0]], normals[to_remove_idx])
+        tet_top_dot_normal = np.dot(mesh.nodes[mesh.tets[tet_idxs, tet_tops[ks]]]-mesh.nodes[to_remove_tri[0]], normals[to_remove_idx])
         lower_tet_idx = np.argmin(tet_top_dot_normal)
 
-        removed_tets += [tet_idxs[lower_tet_idx]]
+        to_remove_mask[tet_idxs[lower_tet_idx]] = True
 
-        new_tris = np.sort(cells[tet_idxs[lower_tet_idx], tet_other_tris[ks[lower_tet_idx]]], axis=1)
-        new_normals = calc_normal_towards(nodes[new_tris], np.mean(nodes[to_remove_tri], axis=0))
+        new_tris = np.sort(mesh.tets[tet_idxs[lower_tet_idx], tet_other_tris[ks[lower_tet_idx]]], axis=1)
+        new_normals = calc_normal_towards(mesh.nodes[new_tris], np.mean(mesh.nodes[to_remove_tri], axis=0))
 
         tris = np.concatenate((np.delete(tris, [to_remove_idx], axis=0), new_tris))
         normals = np.concatenate((np.delete(normals, [to_remove_idx], axis=0), new_normals))
@@ -79,10 +79,21 @@ def extract_slice(nodes, cells, flow_data):
         tris, normals = remove_surface_tris(all_tet_tris, tris, normals)
         tris, normals = trim_disconnected(tris, normals)
 
-        overlap_idxs = calc_overlaps(nodes, b1, b2, tris)
+        overlap_idxs = calc_overlaps(nodes2d, tris)
 
+    mesh.tets = mesh.tets[~to_remove_mask]
 
-    return TriMesh(nodes, tris), removed_tets
+    tri_nodes = np.unique(tris)
+    mesh.nodes[tri_nodes] -= plane_dist[tri_nodes, None]*flow_data.dir[None, :]
+
+    end = TriMesh(mesh.nodes, tris)
+    edge = end.edge()
+
+    edge.clean()
+    end.clean()
+    mesh.clean()
+    return EndSlice(end, edge, flow_data)
+
 def find_connectivity(tris):
     all_tri_edges = np.sort(tris[:, tri_edges], axis=2)
     group_map = np.arange(len(tris))
@@ -110,12 +121,11 @@ def remove_surface_tris(all_tet_tris, tris, normals):
     return tris[~surface_mask], normals[~surface_mask]
 
 def remove_duplicate_tris(tris, normals):
-    duplicates = np.triu(np.all(tris[:, None, :] == tris[None, :, :], axis=2), k=1)
-    duplicate_mask = np.logical_or(np.any(duplicates, axis=0), np.any(duplicates, axis=1))
+    _, inv, cnts = np.unique(tris, axis=0, return_inverse=True, return_counts=True)
+    duplicate_mask = cnts[inv] == 2
     return tris[~duplicate_mask], normals[~duplicate_mask]
 
-def calc_overlaps(nodes, b1, b2, tris):
-    nodes2d = np.stack((np.dot(nodes, b1), np.dot(nodes, b2)), axis=-1)
+def calc_overlaps(nodes2d, tris):
     tris_flat = nodes2d[tris]
     overlaps = np.triu(INSCT.tri_intersect2(tris_flat, tris_flat), k=1)
     return np.unique(np.where(overlaps))
@@ -128,22 +138,7 @@ def calc_normal_towards(tri, p):
 
     return normal
 
-def remove_tip(nodes, cells, point, dir, radius, cut_dist):
-    nodes0 = nodes-point
-    dist_to_plane = np.dot(nodes0, dir)
-    point_in_plane = nodes0-dist_to_plane[:, None]*dir[None, :]
-    mask = np.logical_and(np.logical_and(dist_to_plane > 0.0001, dist_to_plane < 1.5*cut_dist), np.linalg.norm(point_in_plane, axis=1) < 1.5*radius)
-    beyond_idxs = np.where(mask)[0]
-
-    cells_mask = np.any(cells[:,:,None] == beyond_idxs, axis=2)
-
-    single_pruned_cells = (np.sum(cells_mask, axis=1) == 0)
-
-    cells_pruned = cells[single_pruned_cells]
-
-    return cells_pruned
-
-def compute_cluster_meshes(cluster, res=3):
+def compute_cluster_meshes(cluster, res=4):
     verts, tris = cluster_contour(cluster, res)
     tgen = tetgen.TetGen(verts, tris)
     nodes, tets = tgen.tetrahedralize()
@@ -156,58 +151,13 @@ def compute_cluster_meshes(cluster, res=3):
 
     return mesh, in_end, out_ends
 
-def process_end(mesh, flow_data):
-    end, removed_tets = extract_slice(mesh.nodes, mesh.tets, flow_data)
-    edge = end.edge()
-    neighbours = end.calc_neighbours()
-    # def show():
-    #     import pyvista as pv
-    #     from tools.pyvista_plotting import add_tri_mesh, add_tet_mesh
-    #     plt = pv.Plotter()
-    #     add_tet_mesh(plt, mesh)
-    #     add_tri_mesh(plt, end)
-    #     plt.show()
-    Q = QUAT.R_vector_to_vector(flow_data.dir, VEC.k())
-    def transform(p):     return QUAT.rotate(Q, p-flow_data.point)
-    def transform_inv(p): return QUAT.rotate(QUAT.conjugate(Q), p)+flow_data.point
-    
-    _, sorted_idxs = sort_ring_morph(transform(mesh.nodes), edge.segs)
-
-    n = len(sorted_idxs)
-    theta = np.linspace(0, 2*np.pi, n, endpoint=False)
-    theta0 = angle_xy(transform(mesh.nodes[sorted_idxs[0]]))
-    x = flow_data.radius * np.cos(theta-theta0)
-    y = flow_data.radius * np.sin(theta-theta0)
-    z = np.zeros(n)
-
-    circle_nodes = np.dstack((x,y,z))
-    circle_nodes = circle_nodes.reshape(-1, 3)
-    circle_nodes = transform_inv(circle_nodes)
-
-    mesh.nodes[sorted_idxs] = circle_nodes
-
-    laplacian_smoothing(mesh.nodes, neighbours, np.logical_or(~mk_mask(np.unique(end.tris), len(mesh.nodes)), mk_mask(sorted_idxs, len(mesh.nodes))), lr=0.2, iter=50)
-
-    mesh.tets = mesh.tets[~mk_mask(np.array(removed_tets), len(mesh.tets))]
-    mesh.tets = remove_tip(mesh.nodes, mesh.tets, flow_data.point, flow_data.dir, flow_data.radius, flow_data.cut_dist)
-    return EndSlice(end, edge, flow_data.point, flow_data.dir, flow_data.radius)
-
-
 def connector_tube(end1, end2, ang_res):
-    v_p = lerp(end1.point, end2.point, 0.1)
-    v_c = lerp(end1.point, end2.point, 0.9)
-    r_p = lerp(end1.radius, end2.radius, 0.1)
-    r_c = lerp(end1.radius, end2.radius, 0.9)
+    v_p = lerp(end1.flow_data.point, end2.flow_data.point, 0.1)
+    v_c = lerp(end1.flow_data.point, end2.flow_data.point, 0.9)
+    r_p = lerp(end1.flow_data.radius, end2.flow_data.radius, 0.1)
+    r_c = lerp(end1.flow_data.radius, end2.flow_data.radius, 0.9)
     lin_res = int(np.ceil((np.linalg.norm(v_p-v_c)*ang_res)/((r_p+r_c)*np.pi)/4))
     return tube(v_p, v_c, r_p, r_c, ang_res, lin_res)
-
-def connector_tube2(end1, end2, ang_res):
-    v_p = lerp(end1.point, end2.point, 0.1)
-    v_c = lerp(end1.point, end2.point, 0.9)
-    r_p = lerp(end1.radius, end2.radius, 0.1)
-    r_c = lerp(end1.radius, end2.radius, 0.9)
-    lin_res = int(np.ceil((np.linalg.norm(v_p-v_c)*ang_res)/((r_p+r_c)*np.pi)/4))
-    return tube(end1.point, end2.point, end1.radius, end2.radius, ang_res, lin_res)
 
 def tube(p0, p1, r0, r1, ang_res, lin_res):
     dp = np.linalg.norm(p1-p0)
@@ -260,9 +210,9 @@ def sort_ring_morph(points, lines):
     return points[permutation], permutation
 
 def strip(end, cyl_edge):
-    Q = QUAT.R_vector_to_vector(end.dir, VEC.k())
-    def transform(p):     return QUAT.rotate(Q, p-end.point)
-    def transform_inv(p): return QUAT.rotate(QUAT.conjugate(Q), p)+end.point
+    Q = QUAT.R_vector_to_vector(end.flow_data.dir, VEC.k())
+    def transform(p):     return QUAT.rotate(Q, p-end.flow_data.point)
+    def transform_inv(p): return QUAT.rotate(QUAT.conjugate(Q), p)+end.flow_data.point
 
     cyl_points = sort_ring_geom(transform(np.unique(cyl_edge.nodes[cyl_edge.segs].reshape(-1, 3), axis=0)))
     end_points, _ = sort_ring_morph(transform(end.edge.nodes), end.edge.segs)

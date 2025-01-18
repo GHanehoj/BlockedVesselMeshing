@@ -7,16 +7,24 @@ from collections import namedtuple
 import meshio
 
 ### Segment mesh ###
-SegMesh = namedtuple("SegMesh", ["nodes", "segs"])
+class SegMesh:
+    def __init__(self, nodes, segs):
+        self.nodes = nodes
+        self.segs = segs
+    def calc_neighbours(self):
+        L = np.zeros((len(self.nodes), len(self.nodes)))
+        L[self.edges[:,0],self.edges[:,1]] = 1
+        L[self.edges[:,1],self.edges[:,0]] = 1
+        tots = np.sum(L, axis=1)
+        tots[tots == 0] = 1
+        L = L/tots[:, None]
+        return L
 
-def calc_neighbours_seg(mesh):
-    L = np.zeros((len(mesh.nodes), len(mesh.nodes)))
-    L[mesh.edges[:,0],mesh.edges[:,1]] = 1
-    L[mesh.edges[:,1],mesh.edges[:,0]] = 1
-    tots = np.sum(L, axis=1)
-    tots[tots == 0] = 1
-    L = L/tots[:, None]
-    return L
+    def clean(self):
+        self.nodes, self.segs = clean_free_nodes(self.nodes, self.segs)
+
+    def size(self):
+        return (self.nodes.size + self.segs.size)*8/(10**6)
 
 def merge_seg_meshes(meshes):
     v_szs = np.array([mesh.nodes.shape[0] for mesh in meshes])
@@ -32,13 +40,6 @@ def merge_seg_meshes(meshes):
     nodes, segs = merge_duplicate_nodes(nodes, segs)
 
     return SegMesh(nodes, segs)
-
-def clean_seg_mesh(mesh):
-    nodes, segs = clean_free_nodes(mesh.nodes, mesh.segs)
-    return SegMesh(nodes, segs)
-
-def seg_mesh_size(mesh):
-    return (mesh.nodes.size + mesh.segs.size)*8/(10**6)
 
 
 ### Triangle mesh ###
@@ -74,24 +75,8 @@ class TriMesh:
         unique_edges, counts = np.unique(all_edges, axis=0, return_counts=True)
         return unique_edges[counts > 2]
 
-    def collapse_edges(self, edges):
-        edges = np.sort(edges, axis=1)
-        remove_mask = mk_mask(edges[:, 1], len(self.nodes))
-        offsets = np.cumsum(remove_mask)
-
-        remappings = np.arange(len(self.nodes))
-        remappings -= offsets
-        remappings[edges[:, 1]] = edges[:, 0]
-
-        edge_idxs = [[0,1], [1,2], [2,0]]
-
-        tri_edges = np.sort(self.tris[:, edge_idxs], axis=2)
-        tri_mask = np.any(np.all(tri_edges[:,:,None, :] == edges[None, None, :, :], axis=3), axis=(1,2))
-
-        self.nodes = self.nodes[~remove_mask]
-        self.tris = self.tris[~tri_mask]
-        self.tris = remappings[self.tris]
-        # return SegMesh(self.nodes, edges)
+    def clean(self):
+        self.nodes, self.tris = clean_free_nodes(self.nodes, self.tris)
 
     def size(self):
         return (self.nodes.size + self.tris.size)*8/(10**6)
@@ -107,13 +92,11 @@ def merge_tri_meshes(meshes):
     nodes = np.concatenate([mesh.nodes for mesh in meshes])
     tris = np.concatenate([mesh.tris for mesh in meshes])+tOffsets[:, None]
 
-    raw_mesh = TriMesh(nodes, tris)
+    mesh = TriMesh(nodes, tris)
+    mesh.clean()
 
-    return clean_tri_mesh(raw_mesh)
+    return mesh
 
-def clean_tri_mesh(mesh):
-    nodes, tris = clean_free_nodes(mesh.nodes, mesh.tris)
-    return TriMesh(nodes, tris)
 
 
 ### Tetrahedron mesh ###
@@ -142,24 +125,8 @@ class TetMesh:
 
         return TriMesh(self.nodes, tris)
 
-    def collapse_edges(self, edges):
-        edges = np.sort(edges, axis=1)
-        remove_mask = mk_mask(edges[:, 1], len(self.nodes))
-        offsets = np.cumsum(remove_mask)
-
-        remappings = np.arange(len(self.nodes))
-        remappings -= offsets
-        remappings[edges[:, 1]] = edges[:, 0]
-
-        edge_idxs = [[0,1], [1,2], [2,0], [0,3], [1,3], [2,3]]
-
-        tet_edges = np.sort(self.tets[:, edge_idxs], axis=2)
-        tet_mask = np.any(np.all(tet_edges[:,:,None, :] == edges[None, None, :, :], axis=3), axis=(1,2))
-
-        self.nodes = self.nodes[~remove_mask]
-        self.tets = self.tets[~tet_mask]
-        self.tets = remappings[self.tets]
-        # return SegMesh(self.nodes, edges)
+    def clean(self):
+        self.nodes, self.tets = clean_free_nodes(self.nodes, self.tets)
 
     def size(self):
         return (self.nodes.size + self.tets.size)*8/(10**6)
@@ -180,10 +147,6 @@ def merge_tet_meshes(meshes):
 
     nodes, tets = merge_duplicate_nodes(nodes, tets)
 
-    return TetMesh(nodes, tets)
-
-def clean_tet_mesh(mesh):
-    nodes, tets = clean_free_nodes(mesh.nodes, mesh.tets)
     return TetMesh(nodes, tets)
 
 
@@ -212,7 +175,7 @@ class MultiTetMesh:
         aabb_overlap = np.logical_and(mins_below_max, maxs_above_min)
 
         rgs = self.node_idxs[aabb_overlap]
-        remappings = np.full(len(tet.nodes), -1, dtype=int)
+        remappings = np.full(len(tet.nodes), -1, dtype=int) 
         for a, b in rgs:
             eq = np.linalg.norm(self.nodes[None, a:b, :] - tet.nodes[:, None, :], axis=2) < 1e-5
             mask = np.sum(eq, axis=1) != 0

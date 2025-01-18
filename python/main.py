@@ -5,7 +5,7 @@ import full_generation as GEN
 from tools.pyvista_plotting import show_tet_mesh
 from tools.mesh_util import TetMesh
 from tqdm import tqdm
-_MAX_DEPTH = 10
+_MAX_DEPTH = 1000
 # _done_cnt = 0
 
 tree_folder = f"../data/trees/__reg500"

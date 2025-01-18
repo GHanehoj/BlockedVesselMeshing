@@ -2,28 +2,27 @@ import numpy as np
 import tetgen
 from blocked import compute_cluster_meshes, connector_tube, strip
 from tools.numpy_util import mk_mask
-from tools.mesh_util import MultiTetMesh, TetMesh, clean_tet_mesh, merge_tri_meshes
+from tools.mesh_util import MultiTetMesh, TetMesh, merge_tri_meshes
 from tools.smoothing import laplacian_smoothing, taubin_smoothing
 _meshfails = 0
 _connfails = 0
 
-def smooth_transition(tet_mesh, parent_end):
-    p0 = parent_end.point-parent_end.dir*parent_end.radius
-    p1 = parent_end.point+parent_end.dir*parent_end.radius
+def smooth_transition(tet_mesh, flow_data):
+    p0 = tet_mesh.nodes-flow_data.point
+    d = flow_data.dir*flow_data.radius
 
-    parent_mask = np.dot(tet_mesh.nodes-p0, parent_end.dir) < 0
-    child_mask = np.dot(tet_mesh.nodes-p1, -parent_end.dir) < 0
-    geom_mask = np.logical_or(parent_mask, child_mask)
+    mask = np.logical_and.reduce((np.dot(p0+d, flow_data.dir) > 0,
+                                  np.dot(p0-d, flow_data.dir) < 0,
+                                  np.linalg.norm(p0-np.dot(p0, flow_data.dir)[...,None]*flow_data.dir[None,:], axis=1) < 1.5*flow_data.radius))
 
     ## First, we smooth the surface.
     surface = tet_mesh.surface()
     surface_neigh = surface.calc_neighbours()
-    taubin_smoothing(tet_mesh.nodes, surface_neigh, geom_mask, iter=10)
+    taubin_smoothing(tet_mesh.nodes, surface_neigh, ~mask, iter=10)
 
     ## Then the volume
-    fixed_mask = np.logical_or(geom_mask, mk_mask(np.unique(surface.tris), len(tet_mesh.nodes)))
+    fixed_mask = np.logical_or(mask, mk_mask(np.unique(surface.tris), len(tet_mesh.nodes)))
     volume_neigh = tet_mesh.calc_neighbours()
-    # volume_neigh = tet_mesh.neigh_raw[~fixed_mask]/np.maximum(1, tet_mesh.neigh_tots[~fixed_mask,None])
     laplacian_smoothing(tet_mesh.nodes, volume_neigh, fixed_mask)
 
 def gen_tree_clustered(root_cluster, done_f, max_depth):
@@ -50,7 +49,7 @@ def gen_node_clustered_rec(res, cluster, done_f, parent_end, parent_id, depth, m
         global _meshfails
         _meshfails += 1
         for i in range(len(cluster.outflows)):
-            gen_node_clustered_rec(res, cluster.outflows[i].cluster, done_f, None, None, depth+1)
+            gen_node_clustered_rec(res, cluster.outflows[i].cluster, done_f, None, None, depth+1, max_depth)
         return
 
     if parent_end is not None:
@@ -73,15 +72,15 @@ def gen_node_clustered_rec(res, cluster, done_f, parent_end, parent_id, depth, m
             global _connfails
             _connfails += 1
             for i in range(len(cluster.outflows)):
-                gen_node_clustered_rec(res, cluster.outflows[i].cluster, done_f, out_ends[i], cluster_id, depth+1)
+                gen_node_clustered_rec(res, cluster.outflows[i].cluster, done_f, out_ends[i], cluster_id, depth+1, max_depth)
             return
 
         conn_id = res.append_mesh(connector_tet)
 
         sub_mesh = res.get_sub_mesh([parent_id, conn_id, cluster_id])
 
-        smooth_transition(sub_mesh, parent_end)
-        smooth_transition(sub_mesh, in_end)
+        smooth_transition(sub_mesh, parent_end.flow_data)
+        smooth_transition(sub_mesh, in_end.flow_data)
 
         res.write_back(sub_mesh, [parent_id, conn_id, cluster_id])
 
