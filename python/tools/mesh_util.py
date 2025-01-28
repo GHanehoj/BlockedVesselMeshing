@@ -81,6 +81,9 @@ class TriMesh:
     def size(self):
         return (self.nodes.size + self.tris.size)*8/(10**6)
 
+    def save(self, file):
+        meshio.Mesh(self.nodes, [("triangle", self.tris)]).write(file)
+
 def merge_tri_meshes(meshes):
     v_szs = np.array([mesh.nodes.shape[0] for mesh in meshes])
     t_szs = np.array([mesh.tris.shape[0] for mesh in meshes])
@@ -92,10 +95,15 @@ def merge_tri_meshes(meshes):
     nodes = np.concatenate([mesh.nodes for mesh in meshes])
     tris = np.concatenate([mesh.tris for mesh in meshes])+tOffsets[:, None]
 
+    nodes, tris = merge_duplicate_nodes(nodes, tris)
     mesh = TriMesh(nodes, tris)
     mesh.clean()
 
     return mesh
+
+def load_tri(file):
+    msh = meshio.read(file)
+    return TriMesh(msh.points, msh.cells_dict["triangle"])
 
 
 
@@ -150,66 +158,106 @@ def merge_tet_meshes(meshes):
     return TetMesh(nodes, tets)
 
 
+def load_tet(file):
+    msh = meshio.read(file)
+    return TetMesh(msh.points, msh.cells_dict["tetra"])
+
 ### Multi Tetrahedron Mesh ###
+from typing import List
 class MultiTetMesh:
-    def __init__(self):
-        self.nodes = np.empty((0,3))                 # N x 3     array of vertex locations
-        self.tets = np.empty((0,4), dtype=int)       # T x 4     array of tetrahedron vertex indices
-        self.aabbs = np.empty((0,2,3))               # K x 2 x 3 list of AABB for each mesh
-        self.node_idxs = np.empty((0,2), dtype=int)  # K x 2     list of vertex slice for each mesh
-        self.tet_idxs = np.empty((0,2), dtype=int)   # K x 2     list of tetrahedron slice for each mesh
+    def __init__(self,
+                 cluster_tet     : TetMesh,
+                 child_tets      : List['MultiTetMesh'],
+                 connector_tets  : List[TetMesh],
+                 cluster_out_ends: List['EndSlice'],
+                 child_in_ends   : List['EndSlice']):
 
-    def append_mesh(self, tet: TetMesh):
-        """
-        Assumes the new mesh is clean (no superfluous nodes), and merges
-        it with the existing efficiently.
+        assert(len(child_tets) == len(connector_tets))
+        k = len(child_tets)
+        if k == 0:
+            self.nodes = cluster_tet.nodes
+            self.tets = cluster_tet.tets
+            self.root_node_cnt = len(cluster_tet.nodes)
+            self.root_tet_cnt = len(cluster_tet.tets)
+            return
 
-        :param self:              Existing MultiTetMesh, to be extended
-        :param tet:               Additional TetMesh to add
-        """
-        ## give some padding eps!
-        tet_aabb = np.vstack((tet.nodes.min(axis=0), tet.nodes.max(axis=0)))
-
-        mins_below_max = np.all(self.aabbs[:, 0, :] <= tet_aabb[None, 1, :], axis=-1)
-        maxs_above_min = np.all(self.aabbs[:, 1, :] >= tet_aabb[None, 0, :], axis=-1)
-        aabb_overlap = np.logical_and(mins_below_max, maxs_above_min)
-
-        rgs = self.node_idxs[aabb_overlap]
-        remappings = np.full(len(tet.nodes), -1, dtype=int) 
-        for a, b in rgs:
-            eq = np.linalg.norm(self.nodes[None, a:b, :] - tet.nodes[:, None, :], axis=2) < 1e-5
-            mask = np.sum(eq, axis=1) != 0
-            remappings[mask] = np.argmax(eq[mask], axis=1) + a
+        n0 = len(cluster_tet.nodes)
 
 
-        new_mask = remappings == -1
-        n0 = len(self.nodes)
-        new_nodes = tet.nodes[new_mask]
+        idx0 = n0
+        nodes_list = [None]*(2*k+1)
+        tets_list  = [None]*(2*k+1)
+        nodes_list[0] = cluster_tet.nodes
+        tets_list[0] = cluster_tet.tets
 
-        remappings[new_mask] = np.arange(len(new_nodes))+n0
-        t0 = len(self.tets)
-        new_tets = remappings[tet.tets]
+        for i in range(k):
+            conn_remappings = np.full(len(connector_tets[i].nodes), -1, dtype=int) 
+            conn_eq = np.linalg.norm(cluster_tet.nodes[None, :, :] - connector_tets[i].nodes[:, None, :], axis=2) < 1e-5
+            conn_mask = np.sum(conn_eq, axis=1) != 0
+            conn_remappings[conn_mask] = np.argmax(conn_eq[conn_mask], axis=1)
 
-        self.nodes     = np.concatenate((self.nodes, new_nodes), axis=0)
-        self.tets      = np.concatenate((self.tets, new_tets), axis=0)
-        self.aabbs     = np.concatenate((self.aabbs, [tet_aabb]), axis=0)
-        self.node_idxs = np.concatenate((self.node_idxs, [[n0, n0+len(new_nodes)]]), axis=0)
-        self.tet_idxs  = np.concatenate((self.tet_idxs, [[t0, t0+len(new_tets)]]), axis=0)
+            conn_node_cnt = (~conn_mask).sum()
+            conn_remappings[~conn_mask] = np.arange(conn_node_cnt) + n0
+            conn_nodes = connector_tets[i].nodes[~conn_mask]
 
-        return len(self.aabbs)-1
 
-    def get_sub_mesh(self, ids):
-        tets = np.concatenate([self.tets[a:b] for a,b in self.tet_idxs[ids]])
-        node_mask = mk_mask(np.unique(tets), len(self.nodes))
-        offsets = np.cumsum(~node_mask)
-        tets -= offsets[tets]
-        nodes = self.nodes[node_mask]
-        return TetMesh(nodes, tets)
+            child_root_nodes = child_tets[i].nodes[:child_tets[i].root_node_cnt]
+            child_root_tets = child_tets[i].tets[:child_tets[i].root_tet_cnt]
+            child_other_nodes = child_tets[i].nodes[child_tets[i].root_node_cnt:]
+            child_other_tets = child_tets[i].tets[child_tets[i].root_tet_cnt:]
+            child_remappings = np.full(len(child_root_nodes), -1, dtype=int)
+            child_eq = np.linalg.norm(conn_nodes[None, :, :] - child_root_nodes[:, None, :], axis=2) < 1e-5
+            child_mask = np.sum(child_eq, axis=1) != 0
+            child_remappings[child_mask] = np.argmax(child_eq[child_mask], axis=1) + n0
 
-    def write_back(self, sub_mesh, ids):
-        tets = np.concatenate([self.tets[a:b] for a,b in self.tet_idxs[ids]])
-        node_mask = mk_mask(np.unique(tets), len(self.nodes))
-        self.nodes[node_mask] = sub_mesh.nodes
+            child_node_cnt = (~child_mask).sum()
+            child_remappings[~child_mask] = np.arange(child_node_cnt) + conn_node_cnt + n0
+            child_nodes = child_root_nodes[~child_mask]
+
+
+            sub_mesh_nodes = np.concatenate((cluster_tet.nodes, conn_nodes, child_nodes))
+            sub_mesh_tets = np.concatenate((cluster_tet.tets, conn_remappings[connector_tets[i].tets], child_remappings[child_root_tets]))
+            sub_mesh = TetMesh(sub_mesh_nodes, sub_mesh_tets)
+            _smooth_transition(sub_mesh, cluster_out_ends[i].flow_data)
+            _smooth_transition(sub_mesh, child_in_ends[i].flow_data)
+            nodes_list[0]     = sub_mesh.nodes[:n0]
+            nodes_list[2*i+1] = sub_mesh.nodes[n0:n0+conn_node_cnt]
+            nodes_list[2*i+2] = np.concatenate((sub_mesh.nodes[n0+conn_node_cnt:], child_other_nodes), axis=0)
+
+            conn_remappings[~conn_mask] += idx0-n0
+            tets_list[2*i+1] = conn_remappings[connector_tets[i].tets]
+            child_remappings += idx0-n0
+            bobyond_mask = child_other_tets<child_tets[i].root_node_cnt
+            child_other_tets[bobyond_mask] = child_remappings[child_other_tets[bobyond_mask]]
+            child_other_tets[~bobyond_mask] += idx0+conn_node_cnt-child_mask.sum()
+            tets_list[2*i+2] = np.concatenate((child_remappings[child_root_tets], child_other_tets), axis=0)
+
+            idx0 += conn_node_cnt + child_node_cnt+len(child_other_nodes)
+
+
+        self.nodes = np.concatenate(nodes_list, axis=0)
+        self.tets  = np.concatenate(tets_list,  axis=0)
+        self.root_node_cnt = len(cluster_tet.nodes)
+        self.root_tet_cnt = len(cluster_tet.tets)
+
+from tools.smoothing import laplacian_smoothing, taubin_smoothing
+def _smooth_transition(tet_mesh, flow_data):
+    p0 = tet_mesh.nodes-flow_data.point
+    d = flow_data.dir*flow_data.radius
+
+    mask = np.logical_and.reduce((np.dot(p0+d, flow_data.dir) > 0,
+                                  np.dot(p0-d, flow_data.dir) < 0,
+                                  np.linalg.norm(p0-np.dot(p0, flow_data.dir)[...,None]*flow_data.dir[None,:], axis=1) < 1.5*flow_data.radius))
+
+    ## First, we smooth the surface.
+    surface = tet_mesh.surface()
+    surface_neigh = surface.calc_neighbours()
+    taubin_smoothing(tet_mesh.nodes, surface_neigh, ~mask, iter=10)
+
+    ## Then the volume
+    fixed_mask = np.logical_or(mask, mk_mask(np.unique(surface.tris), len(tet_mesh.nodes)))
+    volume_neigh = tet_mesh.calc_neighbours()
+    laplacian_smoothing(tet_mesh.nodes, volume_neigh, fixed_mask)
 
 ### General mesh functions ###
 

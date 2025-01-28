@@ -6,7 +6,7 @@ import torch
 import gc
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-_CAP = 1.0
+_CAP = 10.0
 def cap_diff(V_diff):
     V_dists = torch.linalg.vector_norm(V_diff, dim=1)
     mask = V_dists > _CAP
@@ -20,9 +20,8 @@ def compute_neighbour_matrix(V, E):
     are of cardinality <4, this can be stored in (Nx3).
     Missing neighbours are represented as -1.
     """
-
-    neighbours = np.empty((len(V), 3), dtype=np.int32)
-    neighbours[:] = -1
+    max_N = np.max(np.unique(E, return_counts=True)[1])
+    neighbours = np.full((len(V), max_N), -1, dtype=np.int32)
     for e in E:
         n0 = neighbours[e[0]]
         n0[np.sum(n0 != -1)] = e[1]
@@ -39,32 +38,20 @@ def angle_between(v1, v2):
     return torch.arccos(torch.clip(torch.einsum("...k,...k->...",v1_u, v2_u), -1.0, 1.0))
 
 def laplacian_smooth(V, neighbours, lr):
-    internal_mask = np.sum(neighbours != -1, axis=1) == 3
+    internal_mask = np.sum(neighbours != -1, axis=1) > 1
 
     centers = V[neighbours[internal_mask]]
     arms = centers-V[internal_mask, None, :]
-    idxs = np.array([[0,1], [1,2], [2,0]])
-    mids = torch.mean(centers[:, idxs], dim=2)
+    mids = (centers[:,:,None,:] + centers[:,None,:,:])/2
 
-    angs = angle_between(arms[:, idxs[:,0]], arms[:, idxs[:,1]])
-    weights = torch.pi/torch.maximum(angs, torch.tensor(0.1))
-    weights /= torch.sum(weights, dim=1)[:, None]
+    angs = angle_between(arms[:,:,None,:], arms[:,None,:,:])
+    weights = torch.pi/torch.maximum(angs, torch.tensor(0.01))
+    weights[:, np.tril_indices(5)[0], np.tril_indices(5)[1]] = torch.nan
+    weights /= torch.nansum(weights,dim=(1,2))[:,None,None]
 
-    D = torch.einsum("nk,nkd->nd", weights, mids)-V[internal_mask]
+    D = torch.nansum(weights[:,:,:,None]*mids, dim=(1,2))-V[internal_mask]
 
     V[internal_mask] += cap_diff(lr * D)
-
-# def repel_smooth(V, R, neighbours, lr):
-#     internal_mask = np.sum(neighbours != -1, axis=1) == 3
-
-#     centers = V[neighbours[internal_mask]]
-#     arms = centers-V[internal_mask, None, :]
-
-#     lens = torch.linalg.vector_norm(arms, dim=2)
-#     repels = 3/2*B3(2/3 * lens / (R[internal_mask, None]*4))
-
-#     V[internal_mask] -= cap_diff(lr * torch.sum(repels[:,:,None] * arms, dim=1))
-
 
 def repel_smooth(V, R, neighbours, lr):
     centers = V[neighbours]
@@ -150,7 +137,7 @@ def barrier_optim(V, E, R, g_spaces, lr):
     return psi_tot.cpu().detach().numpy()
 
 
-def smooth(V, E, R, iter=201, lap_lr=0.08, rep_lr=0.01, bar_lr=50, save_fn = None):
+def smooth(V, E, R, iter, lap_lr, rep_lr, bar_lr, save_fn = None):
     V_torch = torch.tensor(V, device=device, requires_grad=True)
     E_torch = torch.tensor(E, device=device)
     R_torch = torch.tensor(R, device=device)

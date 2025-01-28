@@ -3,7 +3,7 @@ from tools.numpy_util import angle_between, lerp
 from collections import namedtuple
 OutFlow = namedtuple("OutFlow", ["cluster", "data"])
 
-_rad_mul = 2
+_rad_mul = 2.2
 _buffer = 2
 
 class FlowData:
@@ -37,8 +37,6 @@ class Cluster:
         cut_dist = calc_cut_dist(node, -1, node.parent)
         if cut_dist is None:
             cut_dist = np.linalg.norm(node.position-node.parent.position)-1.1*_rad_mul*node.parent.radius
-        if cut_dist < _rad_mul*node.radius:
-            assert(False)
         self.in_data = FlowData(node, node.parent, cut_dist)
         self.V = np.array([node.position])
         self.E = np.empty((0,2), dtype=int)
@@ -95,13 +93,6 @@ def expand_cluster(cluster, node, node_idx):
 
 
 def calc_cut_dist(node, i, child):
-    # connector = child.position - node.position
-    # dist = np.linalg.norm(connector)
-    # return dist/2
-
-    # if len(child.children) == 0:
-    #     return None
-
     connector = child.position - node.position
     dist = np.linalg.norm(connector)
 

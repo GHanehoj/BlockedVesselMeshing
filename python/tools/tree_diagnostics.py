@@ -14,8 +14,8 @@ def compute_neighbour_matrix(V, E):
     Missing neighbours are represented as -1.
     """
 
-    neighbours = np.empty((len(V), 3), dtype=np.int32)
-    neighbours[:] = -1
+    max_N = np.max(np.unique(E, return_counts=True)[1])
+    neighbours = np.full((len(V), max_N), -1, dtype=np.int32)
     for e in E:
         n0 = neighbours[e[0]]
         n0[np.sum(n0 != -1)] = e[1]
@@ -24,24 +24,25 @@ def compute_neighbour_matrix(V, E):
     return neighbours
 
 
-tree_folder = f"../../data/trees/-reg200"
+tree_folder = f"../../data/trees/-reg500"
 V, E, R = DATA.load_skeleton_data(tree_folder)
 
 neighbours = compute_neighbour_matrix(V, E)
 
-internal_mask = np.sum(neighbours != -1, axis=1) == 3
+internal_mask = np.sum(neighbours != -1, axis=1) > 1
+
 
 centers = V[neighbours[internal_mask]]
 D = np.mean(centers, axis=1) - V[internal_mask]
 
 arms = centers-V[internal_mask, None, :]
-idxs = np.array([[0,1], [1,2], [2,0]])
-angs = angle_between(arms[:, idxs[:,0]], arms[:, idxs[:,1]])
+angs = angle_between(arms[:,:,None,:], arms[:,None,:,:])
+angs[:, np.tril_indices(5)[0], np.tril_indices(5)[1]] = np.nan
 
 lens = np.linalg.norm(arms, axis=2)/R[internal_mask, None]
 
 plt.hist(angs.flatten(), bins=100)
 plt.show()
 
-plt.hist(lens[lens < 5], bins=100)
+plt.hist(lens[lens < 5].flatten(), bins=100)
 plt.show()
