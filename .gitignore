@@ -4,6 +4,10 @@ data/trees/*
 !data/trees/split
 !data/trees/arterial
 !data/trees/regDone
+data/figures/*
+data/meshes/*
+data/tmp/*
+**/slurm.sh
 python/attic
 _skipped.*
 *.png
