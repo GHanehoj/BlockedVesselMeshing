@@ -34,7 +34,7 @@ def process_end(mesh: TetMesh, flow_data: FlowData):
     nodes2d = np.stack((np.dot(mesh.nodes, b1), np.dot(mesh.nodes, b2)), axis=-1)
 
     beyond_mask = plane_dist > 0
-    close_mask = np.logical_and(plane_dist < 1.7*flow_data.cut_dist, np.linalg.norm(plane_proj, axis=1) < 1.5*flow_data.radius)
+    close_mask = np.logical_and(plane_dist < 3*flow_data.radius, np.linalg.norm(plane_proj, axis=1) < 1.5*flow_data.radius)
 
     cells_beyond = np.isin(mesh.tets, np.where(beyond_mask)[0])
     cells_close = np.all(np.isin(mesh.tets, np.where(close_mask)[0]), axis=1)

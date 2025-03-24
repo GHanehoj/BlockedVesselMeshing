@@ -6,6 +6,7 @@ def gen_tree_clustered(root_cluster, done_f, max_depth):
 
 def gen_node_clustered_rec(cluster, done_f, depth, max_depth):
     cluster_tet, cluster_in_end, cluster_out_ends = compute_cluster_meshes(cluster)
+    done_f()
 
     if depth > max_depth: return MultiTetMesh(cluster_tet, [], [], [], []), cluster_in_end
 
@@ -20,5 +21,4 @@ def gen_node_clustered_rec(cluster, done_f, depth, max_depth):
         except Exception as e:
             print(f"cluster with root {cluster.nodes[0].index} failed")
             return MultiTetMesh(cluster_tet, [], [], [], []), cluster_in_end
-    done_f()
     return MultiTetMesh(cluster_tet, child_tets, connector_tets, cluster_out_ends, child_in_ends), cluster_in_end

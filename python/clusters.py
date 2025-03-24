@@ -3,9 +3,6 @@ from tools.numpy_util import angle_between, lerp
 from collections import namedtuple
 OutFlow = namedtuple("OutFlow", ["cluster", "data"])
 
-_rad_mul = 2.2
-_buffer = 2
-
 class FlowData:
     def __init__(self, node, other, cut_dist):
         diff = other.position - node.position
@@ -33,10 +30,14 @@ def _cnt(cluster, depth, max_depth):
 class Cluster:
     def __init__(self, node):
         self.nodes = [node]
+        self.leaves = []
         self.outflows = []
-        cut_dist = calc_cut_dist(node, -1, node.parent)
+        cut_dist = calc_cut_dist(node, node.parent)
         if cut_dist is None:
-            cut_dist = np.linalg.norm(node.position-node.parent.position)-1.1*_rad_mul*node.parent.radius
+            if node.parent.parent is None:
+                cut_dist = np.linalg.norm(node.position-node.parent.position)
+            else:
+                assert(False)
         self.in_data = FlowData(node, node.parent, cut_dist)
         self.V = np.array([node.position])
         self.E = np.empty((0,2), dtype=int)
@@ -51,6 +52,12 @@ class Cluster:
         self.R = np.concatenate((self.R, [node.radius]), axis=0)
         return node_idx
 
+    def add_leaf(self, node, leaf, node_idx, cut_dist):
+        self.leaves += [leaf]
+        if cut_dist is None:
+            cut_dist = np.linalg.norm(leaf.position - node.position)
+        self._add_flow_to_graph(node, leaf, node_idx, cut_dist)
+
     def add_outflow(self, other_cluster, node, other, node_idx, cut_dist):
         self.outflows += [OutFlow(other_cluster, FlowData(node, other, cut_dist))]
         self._add_flow_to_graph(node, other, node_idx, cut_dist)
@@ -58,7 +65,8 @@ class Cluster:
     def _add_flow_to_graph(self, node, other, node_idx, cut_dist):
         other_idx = len(self.V)
         connector = other.position - node.position
-        frac = _buffer*(cut_dist)/np.linalg.norm(connector)
+        buffer = node.radius
+        frac = (cut_dist+buffer)/np.linalg.norm(connector)
         pos = lerp(node.position, other.position, np.minimum(1, frac))
         rad = lerp(node.radius, other.radius, np.minimum(1,frac))
         self.V = np.concatenate((self.V, [pos]), axis=0)
@@ -66,12 +74,7 @@ class Cluster:
         self.R = np.concatenate((self.R, [rad]), axis=0)
 
     def calc_dx(self, res):
-        node_rad = [node.radius for node in self.nodes]
-        out_rad = [outflow.data.radius for outflow in self.outflows]
-        in_rad = self.in_data.radius
-
-        min_rad = np.min(np.concatenate((node_rad, out_rad, [in_rad])))
-
+        min_rad = np.min(self.R)
         return (2*min_rad)/res
 
 
@@ -82,8 +85,11 @@ def make_cluster(node):
 
 
 def expand_cluster(cluster, node, node_idx):
-    for i, child in enumerate(node.children):
-        cut_dist = calc_cut_dist(node, i, child)
+    for child in node.children:
+        cut_dist = calc_cut_dist(node, child)
+        if len(child.children) == 0:
+            cluster.add_leaf(node, child, node_idx, cut_dist)
+            continue
         if cut_dist is not None:
             child_cluster = make_cluster(child)
             cluster.add_outflow(child_cluster, node, child, node_idx, cut_dist)
@@ -92,29 +98,46 @@ def expand_cluster(cluster, node, node_idx):
             expand_cluster(cluster, child, child_idx)
 
 
-def calc_cut_dist(node, i, child):
+def calc_cut_dist(node, child):
     connector = child.position - node.position
     dist = np.linalg.norm(connector)
 
-    if dist < 1.1*_rad_mul*(node.radius+child.radius):
+    min_out_len = min_len_all(node, child)
+    min_in_len = min_len_all(child, node)
+
+    if np.any(dist < 1.1*(min_out_len + min_in_len)):
         return None
 
-    if len(node.children) == 0:
-        return _rad_mul*node.radius
+    return min_out_len
 
-    other_connectors = np.empty((len(node.children), 3))
-    other_connector_radii = np.empty((len(node.children)))
 
-    for j, other_node in enumerate(node.children):
-        if j == i: other_node = node.parent
-        other_connectors[j] = other_node.position - node.position
-        other_connector_radii[j] = other_node.radius
+def min_len_all(node, child):
+    all_neighbours = node.children + ([node.parent] if node.parent is not None else [])
+    return np.max([2*node.radius]+[min_len_ang(node, child, other) for other in all_neighbours if child != other])
 
-    angles = angle_between(other_connectors, connector)
-    min_lens = (np.where(angles < np.pi/2,
-                         1.5*((node.radius+other_connector_radii)/(2*np.sin(angles))+(node.radius+child.radius)/(2*np.tan(angles))),
-                         0.0))
-    if np.any(dist < 1.1*(min_lens + _rad_mul*child.radius)):
-        return None
+def min_len_ang(node, child, other):
+    child_conn = child.position - node.position
+    other_conn = other.position - node.position
 
-    return np.maximum(_rad_mul*node.radius, np.max(min_lens))
+    theta = angle_between(child_conn, other_conn)
+
+    if theta > np.pi/2: return 0
+    if abs((child.radius-node.radius)/np.linalg.norm(child_conn)) > 1: return 0
+    if abs((other.radius-node.radius)/np.linalg.norm(other_conn)) > 1: return 0
+
+    child_ang_offset = np.arcsin((child.radius-node.radius)/np.linalg.norm(child_conn))
+    other_ang_offset = np.arcsin((other.radius-node.radius)/np.linalg.norm(other_conn))
+
+    phi = (np.pi+child_ang_offset+other_ang_offset-theta)/2
+
+    l = node.radius/np.cos(phi)
+
+    a = np.pi/2+child_ang_offset-phi
+
+    split_dist = np.cos(a)*l
+
+    return split_dist + 1*node.radius
+
+def cluster_list(root : Cluster):
+    child_clusters = [cluster for outflow in root.outflows for cluster in cluster_list(outflow.cluster)]
+    return [root] + child_clusters

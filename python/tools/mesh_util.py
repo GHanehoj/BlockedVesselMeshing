@@ -270,7 +270,7 @@ def clean_free_nodes(nodes, elems):
     :param elems:             N x k array of mesh elements.
     :return:                  2 new arrays containing the cleaned mesh vertices and elements
     """
-    mask = np.any(np.arange(nodes.shape[0])[:, None, None] == elems[None, :, :], axis=(1,2))
+    mask = mk_mask(np.unique(elems), nodes.shape[0])
     offsets = np.cumsum(~mask)
     nodes = nodes[mask]
     elems = elems.copy()

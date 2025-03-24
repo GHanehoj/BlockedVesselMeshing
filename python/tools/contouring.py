@@ -16,7 +16,7 @@ def cluster_contour(cluster, res):
     return verts, tris
 
 def contour(grid):
-    verts, tris, _, _ = marching_cubes(grid.values, 0)
+    verts, tris, _, _ = marching_cubes(grid.values, 0, method="lorensen")
     verts += grid.min
     verts *= grid.dx
 
