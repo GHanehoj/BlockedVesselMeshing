@@ -1,5 +1,5 @@
 import numpy as np
-from tools.numpy_util import angle_between, lerp
+from tools.numpy_util import angle_between, lerp, normalize
 from collections import namedtuple
 OutFlow = namedtuple("OutFlow", ["cluster", "data"])
 
@@ -23,21 +23,18 @@ def _search(cluster, s, idx):
 
 def _cnt(cluster, depth, max_depth):
     if depth > max_depth:
-        return 0
+        return 1
     else:
         return 1 + np.sum([_cnt(outflow.cluster, depth+1, max_depth) for outflow in cluster.outflows], dtype=int)
 
 class Cluster:
-    def __init__(self, node):
+    def __init__(self, node, cut_dist):
         self.nodes = [node]
         self.leaves = []
         self.outflows = []
-        cut_dist = calc_cut_dist(node, node.parent)
         if cut_dist is None:
-            if node.parent.parent is None:
-                cut_dist = np.linalg.norm(node.position-node.parent.position)
-            else:
-                assert(False)
+            assert(node.parent.parent is None)
+            cut_dist = np.linalg.norm(node.position-node.parent.position)
         self.in_data = FlowData(node, node.parent, cut_dist)
         self.V = np.array([node.position])
         self.E = np.empty((0,2), dtype=int)
@@ -73,29 +70,45 @@ class Cluster:
         self.E = np.concatenate((self.E, [[node_idx, other_idx]]), axis=0)
         self.R = np.concatenate((self.R, [rad]), axis=0)
 
-    def calc_dx(self, res):
-        min_rad = np.min(self.R)
-        return (2*min_rad)/res
+    def adjust_inflow(self, adjustment):
+        node = self.nodes[0]
+        parent = node.parent
 
+        orig_cut_dist = self.in_data.cut_dist
+        new_cut_dist = orig_cut_dist + adjustment
+        self.in_data = FlowData(node, parent, new_cut_dist)
 
-def make_cluster(node):
-    cluster = Cluster(node)
+        connector = parent.position - node.position
+        buffer = node.radius
+        frac = (new_cut_dist+buffer)/np.linalg.norm(connector)
+        pos = lerp(node.position, parent.position, np.minimum(1, frac))
+        rad = lerp(node.radius, parent.radius, np.minimum(1,frac))
+
+        self.V[1] = pos
+        self.R[1] = rad
+
+def make_cluster(node, cut_dist=None):
+    cluster = Cluster(node, cut_dist)
     expand_cluster(cluster, node, 0)
     return cluster
 
 
 def expand_cluster(cluster, node, node_idx):
     for child in node.children:
-        cut_dist = calc_cut_dist(node, child)
+        cut_dist, slack, child_cut_dist = calc_cut_dist(node, child)
         if len(child.children) == 0:
             cluster.add_leaf(node, child, node_idx, cut_dist)
             continue
-        if cut_dist is not None:
-            child_cluster = make_cluster(child)
-            cluster.add_outflow(child_cluster, node, child, node_idx, cut_dist)
-        else:
-            child_idx = cluster.add_node(child, node_idx)
-            expand_cluster(cluster, child, child_idx)
+        if cut_dist is not None and not has_self_intersection(cluster, node, child, cut_dist):
+            child_cluster = make_cluster(child, child_cut_dist)
+            inflow_adjustment = calc_inflow_adjustment(child_cluster, slack)
+            if inflow_adjustment is not None:
+                if inflow_adjustment != 0:
+                    child_cluster.adjust_inflow(inflow_adjustment*slack)
+                cluster.add_outflow(child_cluster, node, child, node_idx, cut_dist)
+                continue
+        child_idx = cluster.add_node(child, node_idx)
+        expand_cluster(cluster, child, child_idx)
 
 
 def calc_cut_dist(node, child):
@@ -105,11 +118,12 @@ def calc_cut_dist(node, child):
     min_out_len = min_len_all(node, child)
     min_in_len = min_len_all(child, node)
 
-    if np.any(dist < 1.1*(min_out_len + min_in_len)):
-        return None
+    if np.any(dist < 1.1*(min_out_len + min_in_len)): # just a number??
+        return None, None, None
 
-    return min_out_len
+    slack = np.min(dist - 1.1*(min_out_len + min_in_len))
 
+    return min_out_len, slack, min_in_len
 
 def min_len_all(node, child):
     all_neighbours = node.children + ([node.parent] if node.parent is not None else [])
@@ -137,6 +151,55 @@ def min_len_ang(node, child, other):
     split_dist = np.cos(a)*l
 
     return split_dist + 1*node.radius
+
+def has_self_intersection(cluster : Cluster, node, child, cut_dist):
+    flow_data = FlowData(node, child, cut_dist)
+    for i in range(len(cluster.E)):
+        e = cluster.E[i]
+        p1, p2 = cluster.V[e]
+        if np.allclose(p1, node.position) or np.allclose(p2, node.position):
+            continue
+        r1, r2 = cluster.R[e]
+        dist, t = point_seg_intersect(flow_data.point, p1, p2)
+        r = lerp(r1, r2, t)
+        if dist < 1.5*(r + flow_data.radius):
+            return True
+    return False
+def calc_inflow_adjustment(cluster, slack):
+    flow_data = cluster.in_data
+    for i in np.linspace(0, 1, 5):
+        point = flow_data.point + i*slack*flow_data.dir
+        if not has_inflow_intersection(cluster, point, flow_data.radius): # Assume radius difference is neglegible for now. TODO
+            return i
+    return None
+
+def has_inflow_intersection(cluster, inflow_point, inflow_radius):
+    for i in range(len(cluster.E)):
+        e = cluster.E[i]
+        p1, p2 = cluster.V[e]
+        if np.allclose(p1, cluster.nodes[0].position) or np.allclose(p2, cluster.nodes[0].position):
+            continue
+        r1, r2 = cluster.R[e]
+        dist, t = point_seg_intersect(inflow_point, p1, p2)
+        r = lerp(r1, r2, t)
+        if dist < 1.5*(r + inflow_radius):
+            return True
+    return False
+
+def point_seg_intersect(pnt, start, end):
+    line = end-start
+    vec = pnt-start
+    l = np.linalg.norm(line)
+    dir = line/l
+    t = np.dot(dir, vec)/l
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    nearest = start + t*l*dir
+    dist = np.linalg.norm(nearest-pnt)
+    return (dist, t)
+
 
 def cluster_list(root : Cluster):
     child_clusters = [cluster for outflow in root.outflows for cluster in cluster_list(outflow.cluster)]

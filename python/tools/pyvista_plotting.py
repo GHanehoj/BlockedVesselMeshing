@@ -46,7 +46,7 @@ def show_graph_and_surf(V,E,R,surf):
     p.add_checkbox_button_widget(toggle_graph_vis, value=True, position=(5.0, 0.0))
     p.show()
 
-def show_graph(V,E,R,highlight_idxs):
+def show_graph(V,E,R,highlight_idxs=[]):
     plotter = pv.Plotter()
     plotter.add_lines(V[E].reshape(-1,3), color="k")
     for i in range(len(V)):

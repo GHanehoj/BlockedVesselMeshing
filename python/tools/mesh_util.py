@@ -218,8 +218,8 @@ class MultiTetMesh:
             sub_mesh_nodes = np.concatenate((cluster_tet.nodes, conn_nodes, child_nodes))
             sub_mesh_tets = np.concatenate((cluster_tet.tets, conn_remappings[connector_tets[i].tets], child_remappings[child_root_tets]))
             sub_mesh = TetMesh(sub_mesh_nodes, sub_mesh_tets)
-            _smooth_transition(sub_mesh, cluster_out_ends[i].flow_data)
-            _smooth_transition(sub_mesh, child_in_ends[i].flow_data)
+            # _smooth_transition(sub_mesh, cluster_out_ends[i].flow_data)
+            # _smooth_transition(sub_mesh, child_in_ends[i].flow_data)
             nodes_list[0]     = sub_mesh.nodes[:n0]
             nodes_list[2*i+1] = sub_mesh.nodes[n0:n0+conn_node_cnt]
             nodes_list[2*i+2] = np.concatenate((sub_mesh.nodes[n0+conn_node_cnt:], child_other_nodes), axis=0)
