@@ -46,17 +46,28 @@ def show_graph_and_surf(V,E,R,surf):
     p.add_checkbox_button_widget(toggle_graph_vis, value=True, position=(5.0, 0.0))
     p.show()
 
-def show_graph(V,E,R,highlight_idxs=[]):
+def show_clusters(clusters):
+    plotter = pv.Plotter()
+    for i, cluster in enumerate(clusters):
+        add_graph(plotter, cluster.V, cluster.E, cluster.R)
+        plotter.add_point_labels(cluster.nodes[0].position, [str(i)])
+    plotter.show()
+
+def show_graph(V,E,R):
     plotter = pv.Plotter()
     plotter.add_lines(V[E].reshape(-1,3), color="k")
-    for i in range(len(V)):
-        col = "r" if i in highlight_idxs else "b"
-        plotter.add_mesh(pv.Sphere(R[i], V[i]), color=col, opacity=0.3)
+    points = pv.PolyData(V)
+    points['R'] = R
+    spheres = points.glyph(geom=pv.Sphere(radius=1.0), scale="R")
+    plotter.add_mesh(spheres, opacity=0.5, color="b")
     plotter.show()
+
 def add_graph(plotter, V,E,R):
-    plotter.add_lines(V[E].reshape(-1,3), color="b")
-    for i in range(len(V)):
-        plotter.add_mesh(pv.Sphere(R[i], V[i]), color="b", opacity=0.3)
+    plotter.add_lines(V[E].reshape(-1,3), color="k")
+    points = pv.PolyData(V)
+    points['R'] = R
+    spheres = points.glyph(geom=pv.Sphere(radius=1.0), scale="R")
+    plotter.add_mesh(spheres, opacity=0.5, color="b")
 
 def show_seg_mesh(seg_mesh, color='black'):
     show_seg_meshes([seg_mesh], color)

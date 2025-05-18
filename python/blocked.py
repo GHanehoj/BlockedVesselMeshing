@@ -4,11 +4,13 @@ import rainbow.math.intersection as INSCT
 import rainbow.math.vector3 as VEC
 from tools.mesh_util import SegMesh, TriMesh, TetMesh
 from clusters import FlowData
-from tools.contouring import cluster_contour
-from tools.smoothing import laplacian_smoothing
-from tools.numpy_util import ang_mod, angle_in_plane, angle_between, angle_xy, lerp, mk_mask, pol2cart
-from tools.mesh_util import merge_tri_meshes, rad_ratios, flatness
+from tools.contouring import contour
+import convolution as CONV
+from tools.numpy_util import angle_in_plane, angle_xy, lerp
+from tools.mesh_util import merge_tri_meshes, flatness
 from collections import namedtuple
+import subprocess
+import meshio
 EndSlice = namedtuple("EndSlice", ["end", "edge", "flow_data"])
 
 tet_tris = np.array([[0,1,2], [1,2,3], [0,2,3], [0,1,3]])
@@ -34,7 +36,7 @@ def process_end(mesh: TetMesh, flow_data: FlowData):
     nodes2d = np.stack((np.dot(mesh.nodes, b1), np.dot(mesh.nodes, b2)), axis=-1)
 
     beyond_mask = plane_dist > 0
-    close_mask = np.logical_and(plane_dist < 3*flow_data.radius, np.linalg.norm(plane_proj, axis=1) < 1.5*flow_data.radius)
+    close_mask = np.logical_and(plane_dist < 4*flow_data.radius, np.linalg.norm(plane_proj, axis=1) < 1.6*flow_data.radius)
 
     cells_beyond = np.isin(mesh.tets, np.where(beyond_mask)[0])
     cells_close = np.all(np.isin(mesh.tets, np.where(close_mask)[0]), axis=1)
@@ -53,11 +55,11 @@ def process_end(mesh: TetMesh, flow_data: FlowData):
     tris, normals = remove_surface_tris(all_tet_tris, tris, normals)
     tris, normals = trim_disconnected(tris, normals)
 
-    overlap_idxs = calc_overlaps(nodes2d, tris)
+    overlap_idxs = calc_overlaps(nodes2d, tris, flow_data.radius)
     i = 0
     while len(overlap_idxs) > 0:
         i += 1
-        if i > 50: raise "overlap_overflow"
+        if i > 50: raise Exception("overlap_overflow")
         overlap_plane_dists = np.mean(plane_dist[tris[overlap_idxs]], axis=1)
         to_remove_idx = overlap_idxs[np.argmax(overlap_plane_dists)]
         to_remove_tri = tris[to_remove_idx]
@@ -80,7 +82,7 @@ def process_end(mesh: TetMesh, flow_data: FlowData):
         tris, normals = remove_surface_tris(all_tet_tris, tris, normals)
         tris, normals = trim_disconnected(tris, normals)
 
-        overlap_idxs = calc_overlaps(nodes2d, tris)
+        overlap_idxs = calc_overlaps(nodes2d, tris, flow_data.radius)
 
     # Remove boundary sliver triangles
     edge_segs = TriMesh(mesh.nodes, tris).edge().segs
@@ -147,9 +149,10 @@ def calc_normal(tri):
     normal /= np.linalg.norm(normal, axis=-1)[...,None]
     return normal
 
-def calc_overlaps(nodes2d, tris):
+def calc_overlaps(nodes2d, tris, r):
     tris_flat = nodes2d[tris]
-    overlaps = np.triu(INSCT.tri_intersect2(tris_flat, tris_flat), k=1)
+    eps = r/10e6
+    overlaps = np.triu(INSCT.tri_intersect2(tris_flat, tris_flat, eps), k=1)
     return np.unique(np.where(overlaps))
 
 def calc_normal_towards(tri, p):
@@ -160,18 +163,40 @@ def calc_normal_towards(tri, p):
 
     return normal
 
+def generate_cluster_mesh(cluster, res):
+    centre = np.mean(cluster.V, axis=0)
+    sz = 100/np.median(cluster.R)
+
+    V = (cluster.V-centre)*sz
+    E = cluster.E
+    R = cluster.R*0.65*sz
+    radii = ([cluster.in_data.radius] if cluster.in_data is not None else []) + [node.radius for node in cluster.nodes] + [outflow.data.radius for outflow in cluster.outflows]
+    dx = ((2*np.min(radii))/res)*sz
+
+    grid = CONV.conv_surf(V, E, R, dx)
+    if grid.dim[0]*grid.dim[1]*grid.dim[2] > 200*200*200:
+        a=2
+    verts, tris = contour(grid)
+
+    mesh = run_tetgen(verts, tris, False)
+
+    mesh.nodes = np.float128(mesh.nodes)
+    mesh.nodes /= sz
+    mesh.nodes += centre
+    mesh.nodes = np.float64(mesh.nodes)
+    return mesh
+
 def run_tetgen(verts, tris, preserve_surface=True):
-    import subprocess
-    import meshio
     mesh = meshio.Mesh(verts, [("triangle", tris)])
-    mesh.write("_tmp.mesh")
+    mesh.write("_temp.mesh")
+
     options = "-QENFgq1.4/10" + ("Y" if preserve_surface else "")
-    proc = subprocess.run(["tetgen", options, "_tmp.mesh"], capture_output=True)
-    if (proc.returncode != 0):
-        raise Exception("tetgen failed")
-    res = meshio.read("_tmp.1.mesh")
+    _tetgen(options)
+
+    res = meshio.read("_temp.1.mesh")
     if len(res.points) == 0:
         raise Exception("tetgen failed")
+
     tet = TetMesh(res.points, res.cells_dict["tetra"])
     
     flat_tets = flatness(tet.nodes[tet.tets]) < 2
@@ -182,31 +207,53 @@ def run_tetgen(verts, tris, preserve_surface=True):
     tet.tets = np.delete(tet.tets, to_remove, axis=0)
 
     return tet
-# def run_tetgen(verts, tris):
-#     import tetgen
-#     tgen = tetgen.TetGen(verts, tris)
-#     nodes, elems = tgen.tetrahedralize(order=1, mindihedral=20, minratio=1.5, nobisect=True)
-#     return TetMesh(nodes, elems)
 
+def _tetgen(options):
+    proc = subprocess.run(["tetgen", options, "_temp.mesh"], capture_output=True)
+    if (proc.returncode == 0): return
 
-def compute_cluster_meshes(cluster, res=5):
-    verts, tris = cluster_contour(cluster, res)
-    mesh = run_tetgen(verts, tris, False)
+    options = "-QENFgqY"
+    proc = subprocess.run(["tetgen", options, "_temp.mesh"], capture_output=True)
+    if (proc.returncode == 0): return
+
+    options = "-QENFgq"
+    proc = subprocess.run(["tetgen", options, "_temp.mesh"], capture_output=True)
+    if (proc.returncode == 0): return
+
+    raise Exception("tetgen failed")
+
+def compute_cluster_meshes(cluster, res=3):
+    if cluster.nodes[0].index == 31:
+        a=2
+    mesh = generate_cluster_mesh(cluster, res)
 
     out_ends = [None]*len(cluster.outflows)
     for i, outflow in enumerate(cluster.outflows):
         out_ends[i] = process_end(mesh, outflow.data)
-    in_end = process_end(mesh, cluster.in_data)
+    in_end = process_end(mesh, cluster.in_data) if cluster.in_data is not None else None
 
     return mesh, in_end, out_ends
 
+def end_radius(end):
+    _, proj = proj_to_plane(end.edge.nodes, end.flow_data)
+    centre = np.mean(proj, axis=0)
+    dists = np.linalg.norm(proj-centre, axis=1)
+    return np.mean(dists)
+
 def connector_tube(end1, end2, ang_res):
-    v_p = lerp(end1.flow_data.point, end2.flow_data.point, 0.05)
-    v_c = lerp(end1.flow_data.point, end2.flow_data.point, 0.95)
-    r_p = lerp(end1.flow_data.radius, end2.flow_data.radius, 0.05)
-    r_c = lerp(end1.flow_data.radius, end2.flow_data.radius, 0.95)
+    r1 = end_radius(end1)
+    r2 = end_radius(end2)
+    l = np.linalg.norm(end1.flow_data.point - end2.flow_data.point)
+    frac1 = min(0.1, (0.5*r1)/l)
+    # frac1 = min(0.2, (0.5*r1)/l)
+    frac2 = 1-min(0.1, (0.5*r2)/l)
+    # frac2 = 1-min(0.2, (0.5*r2)/l)
+    v_p = lerp(end1.flow_data.point, end2.flow_data.point, frac1)
+    v_c = lerp(end1.flow_data.point, end2.flow_data.point, frac2)
+    r_p = lerp(r1, r2, frac1)
+    r_c = lerp(r1, r2, frac2)
     lin_res = int(np.ceil((np.linalg.norm(v_p-v_c)*ang_res)/((r_p+r_c)*np.pi)/2))
-    return tube(v_p, v_c, 1.1*r_p, 1.1*r_c, ang_res, lin_res)
+    return tube(v_p, v_c, r_p, r_c, ang_res, lin_res)
 
 def tube(p0, p1, r0, r1, ang_res, lin_res):
     dp = np.linalg.norm(p1-p0)
@@ -258,127 +305,8 @@ def sort_ring_morph(points, lines):
         permutation = permutation[::-1]
     return points[permutation]
 
-# def strip(end, cyl_edge, r):
-#     Q = QUAT.R_vector_to_vector(end.flow_data.dir, VEC.k())
-#     def transform(p):     return QUAT.rotate(Q, p-end.flow_data.point)
-#     def transform_inv(p): return QUAT.rotate(QUAT.conjugate(Q), p)+end.flow_data.point
-
-#     cyl_points = sort_ring_geom(transform(np.unique(cyl_edge.nodes[cyl_edge.segs].reshape(-1, 3), axis=0)))
-#     end_points, _ = sort_ring_morph(transform(end.edge.nodes), end.edge.segs)
-
-#     tris = []
-#     i = 0
-#     j = 0
-#     angles = ang_mod(angle_xy(end_points)-angle_xy(cyl_points[0]))
-#     j0 = np.argmax(np.where(angles < 0, angles, -np.inf))
-
-#     def end_p(j): return end_points[(j+j0) % end_points.shape[0]]
-#     def cyl_p(i): return cyl_points[i % cyl_points.shape[0]]
-#     def end_i(j): return (j+j0) % end_points.shape[0]
-#     def cyl_i(i): return end_points.shape[0] + (i % cyl_points.shape[0])
-#     def show():
-#         import pyvista as pv
-#         plotter = pv.Plotter()
-#         plotter.add_points(cyl_points)
-#         plotter.add_points(end_points)
-#         plotter.add_points(cyl_p(i), color="r", point_size=5)
-#         plotter.add_points(cyl_p(i+1), color="r", point_size=3)
-#         plotter.add_points(end_p(j), color="g", point_size=5)
-#         plotter.add_points(end_p(j+1), color="g", point_size=3)
-#         nodes = np.concatenate((end_points, cyl_points), axis=0)
-#         if len(tris) > 0:
-#             tris222 = np.array(tris)
-#             tris222 = np.hstack((np.full((tris222.shape[0], 1), 3), tris222))
-#             plotter.add_mesh(pv.PolyData(nodes, tris222))
-
-#         plotter.show()
-#     while i < cyl_points.shape[0] and j < end_points.shape[0]:
-#         ang_to_cur_end_p = angle_xy(end_p(j))
-#         ang_to_cur_cyl_p = angle_xy(cyl_p(i))
-#         ang_to_next_end_p = angle_xy(end_p(j+1))
-#         ang_to_next_cyl_p = angle_xy(cyl_p(i+1))
-#         ang_from_cur_cyl_p_to_cur_end_p = ang_mod(ang_to_cur_end_p - ang_to_cur_cyl_p)
-#         ang_from_cur_end_p_to_next_end_p = ang_mod(ang_to_next_end_p - ang_to_cur_end_p)
-#         ang_from_next_cyl_p_to_next_end_p = ang_mod(ang_to_next_end_p - ang_to_next_cyl_p)
-#         ang_from_next_end_p_to_cur_end_p = ang_mod(ang_to_cur_end_p - ang_to_next_end_p)
-#         height_from_cur_cyl_p_to_cur_end_p = -(end_p(j)[2] - cyl_p(i)[2])
-#         height_from_cur_end_p_to_next_end_p = -(end_p(j+1)[2] - end_p(j)[2])
-#         height_from_next_cyl_p_to_next_end_p = -(end_p(j+1)[2] - cyl_p(i+1)[2])
-#         height_from_next_end_p_to_cur_end_p = -(end_p(j)[2] - end_p(j+1)[2])
-        
-#         slope1a = np.arctan2(height_from_cur_cyl_p_to_cur_end_p, r*ang_from_cur_cyl_p_to_cur_end_p)
-#         slope1b = np.arctan2(height_from_cur_end_p_to_next_end_p, r*ang_from_cur_end_p_to_next_end_p)
-#         slope2a = np.arctan2(height_from_next_cyl_p_to_next_end_p, r*ang_from_next_cyl_p_to_next_end_p)
-#         slope2b = np.arctan2(height_from_next_end_p_to_cur_end_p, r*ang_from_next_end_p_to_cur_end_p)
-
-
-#         if ang_mod(np.pi - (slope1a - slope1b)) > 0.9*np.pi:
-#             tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#             i += 1
-#             continue
-#         if ang_mod(np.pi - (slope2b - slope2a)) > 0.9*np.pi:
-#             tris.append([cyl_i(i), end_i(j), end_i(j+1)])
-#             j += 1
-#             continue
-
-#         # area_next_end_p = 0.5*np.linalg.norm(np.cross(end_p(j)-cyl_p(i), end_p(j+1)-cyl_p(i)))
-#         # area_next_cyl_p = 0.5*np.linalg.norm(np.cross(end_p(j)-cyl_p(i), cyl_p(i+1)-cyl_p(i)))
-#         # area_full_trapez = area_next_end_p + 0.5*np.linalg.norm(np.cross(end_p(j+1)-cyl_p(i), cyl_p(i+1)-cyl_p(i)))
-        
-#         len_next_end_p = np.linalg.norm(end_p(j+1)-cyl_p(i))
-#         len_next_cyl_p = np.linalg.norm(cyl_p(i+1)-end_p(j))
-
-#         # if area_next_end_p/area_full_trapez > 0.8 or area_next_end_p/area_full_trapez < 0.2:
-#         #     tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#         #     i += 1
-#         #     continue
-#         # if area_next_end_p/area_full_trapez > 0.8 or area_next_end_p/area_full_trapez < 0.2:
-#         #     tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#         #     i += 1
-#         #     continue
-#         # if area_next_cyl_p/area_full_trapez > 0.8 or area_next_cyl_p/area_full_trapez < 0.2 :
-#         #     tris.append([cyl_i(i), end_i(j), end_i(j+1)])
-#         #     j += 1
-#         #     continue
-
-#         # if ang_from_cur_end_p_to_cur_cyl_p > 0 and ang_from_next_end_p_to_next_cyl_p > 0:
-#         #     tris.append([cyl_i(i), end_i(j), end_i(j+1)])
-#         #     j += 1
-#         #     continue
-#         # if ang_from_cur_end_p_to_cur_cyl_p < 0 and ang_from_next_end_p_to_next_cyl_p < 0:
-#         #     tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#         #     i += 1
-#         #     continue
-#         # if ang_from_cur_end_p_to_cur_cyl_p > 0 and ang_from_next_end_p_to_next_cyl_p < 0:
-#         #     if angle_xy(end_p(j)-cyl_p(i)) < angle_xy(end_p(j+1)-cyl_p(i)):
-#         #         tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#         #         i += 1
-#         #         continue
-#         #     if angle_xy(end_p(j+1)-cyl_p(i+1)) < angle_xy(end_p(j)-cyl_p(i+1)):
-#         #         tris.append([cyl_i(i), end_i(j), end_i(j+1)])
-#         #         j += 1
-#         #         continue
-#         if len_next_end_p < len_next_cyl_p:
-#             tris.append([cyl_i(i), end_i(j), end_i(j+1)])
-#             j += 1
-#         else:
-#             tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#             i += 1
-
-#     while j < end_points.shape[0]:
-#         tris.append([cyl_i(i), end_i(j), end_i(j+1)])
-#         j += 1
-#     while i < cyl_points.shape[0]:
-#         tris.append([cyl_i(i), end_i(j), cyl_i(i+1)])
-#         i += 1
-
-#     nodes = np.concatenate((end_points, cyl_points), axis=0)
-#     nodes = transform_inv(nodes)
-#     tris = np.array(tris)
-
-#     return TriMesh(nodes, tris)
 import pyvista as pv
-import triangle as tr
+# import triangle as tr
 def strip(end, cyl_edge, r):
     Q = QUAT.R_vector_to_vector(end.flow_data.dir, VEC.k())
     def transform(p):     return QUAT.rotate(Q, p-end.flow_data.point)
@@ -431,8 +359,8 @@ def strip(end, cyl_edge, r):
         v2 = end_projs2[i+1]-end_projs2[i]
         v_cs1 = cyl_projs2 - end_projs2[i-1]
         v_cs2 = cyl_projs2 - end_projs2[i+1]
-        left_bound = np.arctan2(np.cross(v_cs1, v1), np.dot(v_cs1, v1)) < -0.2
-        right_bound = np.arctan2(np.cross(v_cs2, v2), np.dot(v_cs2, v2)) > 0.2
+        left_bound = np.arctan2(np.cross(v_cs1, v1), np.dot(v_cs1, v1)) < -0.4
+        right_bound = np.arctan2(np.cross(v_cs2, v2), np.dot(v_cs2, v2)) > 0.4
         valid_idxs = np.where(np.logical_and(np.logical_or(v1[1] > 0, left_bound), np.logical_or(v2[1] > 0, right_bound)))[0]
         left_edges = end_to_cyl_map[:i][::-1]
         left_edge = int(left_edges[np.isfinite(left_edges)][0])
@@ -457,7 +385,7 @@ def strip(end, cyl_edge, r):
             if cur_range is None:
                 cur_range = [i]
             else:
-                cur_range.append[i]
+                cur_range.append(i)
     # TODO: triangulate unmapped ranges
 
     extra_tri_meshes = []
@@ -469,8 +397,17 @@ def strip(end, cyl_edge, r):
             nodes = transform_inv(nodes)
             tris = np.array([[0,1,2]])
             extra_tri_meshes.append(TriMesh(nodes, tris))
+        elif len(unmapped_idxs) == 2:
+            idxs = [unmapped_idxs[0]-1] + unmapped_idxs + [unmapped_idxs[len(unmapped_idxs)-1]+1]
+            # verts = end_projs2[idxs]
+            # t = tr.triangulate({'vertices': verts})
+            nodes = end_nodes[idxs]
+            nodes = transform_inv(nodes)
+            tris = np.array([[0,1,2], [2,3,0]])
+            # tris = t['triangles']
+            extra_tri_meshes.append(TriMesh(nodes, tris))
         else:
-            a=2
+            raise Exception("too complex unmapped region")
 
     remaining_end_idxs = np.where(np.isfinite(end_to_cyl_map))[0]
     remaining_end_projs = end_projs2[remaining_end_idxs]
@@ -527,10 +464,18 @@ def make_connector(end1: EndSlice, end2: EndSlice) -> TetMesh:
     conn_mesh, conn_edge1, conn_edge2 = connector_tube(end1, end2, edge_cnt)
 
     strip1 = strip(end1, conn_edge1, 0.95*end1.flow_data.radius)
-    strip2 = strip(end2, conn_edge2, 0.95*end1.flow_data.radius)
+    strip2 = strip(end2, conn_edge2, 0.95*end2.flow_data.radius)
 
     connector_tri = merge_tri_meshes([end1.end, strip1, conn_mesh, strip2, end2.end])
 
-    tet = run_tetgen(connector_tri.nodes, connector_tri.tris)
+    centre = np.mean(connector_tri.nodes, axis=0)
+    sz = 100/np.median([end1.flow_data.radius, end2.flow_data.radius])
+
+    tet = run_tetgen((connector_tri.nodes-centre)*sz, connector_tri.tris)
+
+    tet.nodes = np.float128(tet.nodes)
+    tet.nodes /= sz
+    tet.nodes += centre
+    tet.nodes = np.float64(tet.nodes)
 
     return tet

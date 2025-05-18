@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.abspath('../'))
 import numpy as np
 from tools.numpy_util import mk_mask
-from collections import namedtuple
+from rainbow.math.tetrahedron import compute_inscribed_sphere, compute_circumscribed_sphere
 import meshio
 
 ### Segment mesh ###
@@ -191,8 +191,8 @@ class MultiTetMesh:
         tets_list[0] = cluster_tet.tets
 
         for i in range(k):
-            conn_remappings = np.full(len(connector_tets[i].nodes), -1, dtype=int) 
-            conn_eq = np.linalg.norm(cluster_tet.nodes[None, :, :] - connector_tets[i].nodes[:, None, :], axis=2) < 1e-5
+            conn_remappings = np.full(len(connector_tets[i].nodes), -1, dtype=int)
+            conn_eq = np.linalg.norm(cluster_out_ends[i].end.nodes[None, :, :] - connector_tets[i].nodes[:, None, :], axis=2) < 1e-5
             conn_mask = np.sum(conn_eq, axis=1) != 0
             conn_remappings[conn_mask] = np.argmax(conn_eq[conn_mask], axis=1)
 
@@ -206,7 +206,7 @@ class MultiTetMesh:
             child_other_nodes = child_tets[i].nodes[child_tets[i].root_node_cnt:]
             child_other_tets = child_tets[i].tets[child_tets[i].root_tet_cnt:]
             child_remappings = np.full(len(child_root_nodes), -1, dtype=int)
-            child_eq = np.linalg.norm(conn_nodes[None, :, :] - child_root_nodes[:, None, :], axis=2) < 1e-5
+            child_eq = np.linalg.norm(child_in_ends[i].end.nodes[None, :, :] - child_root_nodes[:, None, :], axis=2) < 1e-5
             child_mask = np.sum(child_eq, axis=1) != 0
             child_remappings[child_mask] = np.argmax(child_eq[child_mask], axis=1) + n0
 
@@ -215,21 +215,16 @@ class MultiTetMesh:
             child_nodes = child_root_nodes[~child_mask]
 
 
-            sub_mesh_nodes = np.concatenate((cluster_tet.nodes, conn_nodes, child_nodes))
-            sub_mesh_tets = np.concatenate((cluster_tet.tets, conn_remappings[connector_tets[i].tets], child_remappings[child_root_tets]))
-            sub_mesh = TetMesh(sub_mesh_nodes, sub_mesh_tets)
-            # _smooth_transition(sub_mesh, cluster_out_ends[i].flow_data)
-            # _smooth_transition(sub_mesh, child_in_ends[i].flow_data)
-            nodes_list[0]     = sub_mesh.nodes[:n0]
-            nodes_list[2*i+1] = sub_mesh.nodes[n0:n0+conn_node_cnt]
-            nodes_list[2*i+2] = np.concatenate((sub_mesh.nodes[n0+conn_node_cnt:], child_other_nodes), axis=0)
+            nodes_list[0]     = cluster_tet.nodes
+            nodes_list[2*i+1] = conn_nodes
+            nodes_list[2*i+2] = np.concatenate((child_nodes, child_other_nodes), axis=0)
 
             conn_remappings[~conn_mask] += idx0-n0
             tets_list[2*i+1] = conn_remappings[connector_tets[i].tets]
             child_remappings += idx0-n0
-            bobyond_mask = child_other_tets<child_tets[i].root_node_cnt
-            child_other_tets[bobyond_mask] = child_remappings[child_other_tets[bobyond_mask]]
-            child_other_tets[~bobyond_mask] += idx0+conn_node_cnt-child_mask.sum()
+            child_tet_root_mask = child_other_tets>=child_tets[i].root_node_cnt
+            child_other_tets[~child_tet_root_mask] = child_remappings[child_other_tets[~child_tet_root_mask]]
+            child_other_tets[child_tet_root_mask] += idx0+conn_node_cnt-child_mask.sum()
             tets_list[2*i+2] = np.concatenate((child_remappings[child_root_tets], child_other_tets), axis=0)
 
             idx0 += conn_node_cnt + child_node_cnt+len(child_other_nodes)
@@ -239,25 +234,6 @@ class MultiTetMesh:
         self.tets  = np.concatenate(tets_list,  axis=0)
         self.root_node_cnt = len(cluster_tet.nodes)
         self.root_tet_cnt = len(cluster_tet.tets)
-
-from tools.smoothing import laplacian_smoothing, taubin_smoothing
-def _smooth_transition(tet_mesh, flow_data):
-    p0 = tet_mesh.nodes-flow_data.point
-    d = flow_data.dir*flow_data.radius
-
-    mask = np.logical_and.reduce((np.dot(p0+d, flow_data.dir) > 0,
-                                  np.dot(p0-d, flow_data.dir) < 0,
-                                  np.linalg.norm(p0-np.dot(p0, flow_data.dir)[...,None]*flow_data.dir[None,:], axis=1) < 1.5*flow_data.radius))
-
-    ## First, we smooth the surface.
-    surface = tet_mesh.surface()
-    surface_neigh = surface.calc_neighbours()
-    taubin_smoothing(tet_mesh.nodes, surface_neigh, ~mask, iter=10)
-
-    ## Then the volume
-    fixed_mask = np.logical_or(mask, mk_mask(np.unique(surface.tris), len(tet_mesh.nodes)))
-    volume_neigh = tet_mesh.calc_neighbours()
-    laplacian_smoothing(tet_mesh.nodes, volume_neigh, fixed_mask)
 
 ### General mesh functions ###
 
@@ -277,7 +253,8 @@ def clean_free_nodes(nodes, elems):
     elems -= offsets[elems]
     return nodes, elems
 
-def merge_duplicate_nodes(nodes, elems, tol=1e-5):
+import pyvista as pv
+def merge_duplicate_nodes2(nodes, elems, tol=1e-5):
     """
     Merges nodes that are positionally identical, combining their
     connectivity information. Keeps original arrays intact.
@@ -295,3 +272,39 @@ def merge_duplicate_nodes(nodes, elems, tol=1e-5):
     elems = remappings[elems]
     elems -= offsets[elems]
     return nodes, elems
+
+def merge_duplicate_nodes(nodes, elems, tol=1e-5):
+    N, k = elems.shape
+    pv_mesh = pv.PolyData(nodes, np.hstack((np.full((N,1), k), elems)))
+    pv_mesh = pv_mesh.clean(tolerance=tol)
+    nodes = pv_mesh.points
+    elems = pv_mesh.faces.reshape(-1,k+1)[:,1:]
+    return nodes, elems
+
+def rad_ratio(tet):
+    r_out = compute_circumscribed_sphere(*tet)[1]
+    r_in = compute_inscribed_sphere(*tet)[1]
+    return 3*r_in/r_out
+
+def rad_ratios(tet_mesh):
+    return np.array([rad_ratio(tet) for tet in tet_mesh.nodes[tet_mesh.tets]])
+
+def flatness(tet):
+    a = tet[:,0,:]
+    b = tet[:,1,:]
+    c = tet[:,2,:]
+    d = tet[:,3,:]
+    ab = a-b
+    ac = a-c
+    ad = a-d
+    bc = b-c
+    bd = b-d
+    cd = c-d
+    norm = lambda v: np.linalg.norm(v, axis=1)
+    num = 80*np.abs(np.einsum("id,id->i", np.cross(ab, ac), ad))
+    inv = (norm(ab)+norm(cd))*(norm(ac)+norm(bd))*(norm(ad)+norm(bc))
+    mask = inv != 0
+    flatness = np.empty(len(tet))
+    flatness[~mask] = np.inf
+    flatness[mask] = num[mask]/inv[mask]
+    return flatness

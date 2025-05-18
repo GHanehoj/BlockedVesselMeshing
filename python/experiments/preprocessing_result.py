@@ -132,11 +132,10 @@ axes[0,1].set_ylabel("Value of barrier criterion")
 axes[0,1].set_yscale("log")
 
 axes[1,0].plot(xs, np.any(arm_lens<3, axis=2).sum(axis=1)/arm_lens.shape[1]*100)
-axes[1,0].plot(xs, np.any(arm_lens<2.5, axis=2).sum(axis=1)/arm_lens.shape[1]*100)
 axes[1,0].set_title("C) Frequency of Short Vessels")
 axes[1,0].set_xlabel("# of smoothing iterations")
 axes[1,0].set_ylabel("% of vessels being short")
-axes[1,0].legend(["$|e| < 3 \cdot R$", "$|e| < 2.5 \cdot R$"], loc="upper right")
+# axes[1,0].legend(["$|e| < 3 \cdot R$"], loc="upper right")
 
 angle_cnts = np.sum(angles < np.pi/10, axis=(1,2))/angles.shape[1]/2*100
 axes[1,1].plot(xs, angle_cnts)

@@ -5,6 +5,9 @@ def gen_tree_clustered(root_cluster, done_f, max_depth):
     return gen_node_clustered_rec(root_cluster, done_f, 0, max_depth)[0]
 
 def gen_node_clustered_rec(cluster, done_f, depth, max_depth):
+    if cluster.nodes[0].index == 14074:
+        a=2
+    
     cluster_tet, cluster_in_end, cluster_out_ends = compute_cluster_meshes(cluster)
     done_f()
 

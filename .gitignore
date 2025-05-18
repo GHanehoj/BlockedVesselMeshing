@@ -1,5 +1,6 @@
 __pycache__/
 data/trees/*
+data/input/*
 !data/trees/orig
 !data/trees/split
 !data/trees/arterial

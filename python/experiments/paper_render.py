@@ -5,6 +5,23 @@ import numpy as np
 import polyscope as ps
 import meshio
 import data as DATA
+import clusters as CLUSTERS
+import tree as TREE
+from tools.contouring import cluster_contour, graph_contour
+from blocked import run_tetgen
+from tools.mesh_util import MultiTetMesh, load_tet, load_tri
+from tools.numpy_util import mk_mask, normalize, rad_to_deg
+from blocked import *
+WARM_GREY = (0.89, 0.808, 0.655)
+DARK_GREY = (0.234, 0.325, 0.409)
+BLUE_GREY = (0.423, 0.432, 0.459)
+BRIGHT_RED = (0.830, 0, 0)
+PASTEL_RED = (0.512, 0.113, 0.113)
+PASTEL_BLUE = (0.314, 0.511, 0.694)
+PASTEL_DARK_BLUE = (0.207, 0.297, 0.523)
+PASTEL_GREEN = (0.206, 0.541, 0.177)
+PASTEL_YELLOW = (0.648, 0.545, 0.159)
+PASTEL_PURPLE = (0.762, 0.333, 0.672)
 ps.init()
 ps.set_screenshot_extension(".png")
 ps.set_window_size(1500, 1000)
@@ -20,41 +37,7 @@ def add_tet(tet_mesh, id):
 
 def show_cluster_meshes(tet, in_end, out_ends, id, offset=np.array([0,0,0])):
     ps.register_volume_mesh(f"{id}_tet", tet.nodes+offset, tet.tets, color=PASTEL_RED, interior_color=WARM_GREY, edge_width=0.5)
-    msh = ps.register_surface_mesh(f"{id}_in_end", in_end.end.nodes+offset, in_end.end.tris, color=WARM_GREY, edge_width=0.5, back_face_policy="identical")
-    msh.set_cull_whole_elements(True)
-    for i, out_end in enumerate(out_ends):
-        msh = ps.register_surface_mesh(f"{id}_out_end_{i}", out_end.end.nodes+offset, out_end.end.tris, color=WARM_GREY, edge_width=0.5, back_face_policy="identical")
-        msh.set_cull_whole_elements(True)
-
-from tools.contouring import cluster_contour
-from tools.mesh_util import MultiTetMesh, load_tet, load_tri
-from tools.numpy_util import mk_mask
-from blocked import *
-import clusters as CLUSTERS
-import data as DATA
-import tree as TREE
-WARM_GREY = (0.89, 0.808, 0.655)
-DARK_GREY = (0.234, 0.325, 0.409)
-PASTEL_RED = (0.512, 0.113, 0.113)
-PASTEL_BLUE = (0.314, 0.511, 0.694)
-PASTEL_DARK_BLUE = (0.207, 0.297, 0.523)
-PASTEL_GREEN = (0.206, 0.541, 0.177)
-PASTEL_YELLOW = (0.648, 0.545, 0.159)
-PASTEL_PURPLE = (0.762, 0.333, 0.672)
-
-def load(id):
-    tree_folder = f"../../data/trees/{id}"
-    V, E, R = DATA.load_skeleton_data(tree_folder)
-    root, _ = TREE.make_tree(V, E, R)
-    # root.position += 5*(root.position - root.children[0].position)
-
-    root_cluster = CLUSTERS.make_cluster(root.children[0])
-    cluster = root_cluster.outflows[0].cluster.outflows[0].cluster.outflows[0].cluster.outflows[1].cluster.outflows[0].cluster
-    parent = root_cluster.outflows[0].cluster.outflows[0].cluster.outflows[0].cluster.outflows[1].cluster
-
-    return V, E, R, cluster, parent, root_cluster
-
-
+    msh = ps.r317
 def fig1():
     ps.set_up_dir("neg_z_up")
     setview([-0.869497001171112,-0.474276095628738,-0.13790787756443,272.307647705078,-0.00464040925726295,0.287041217088699,-0.957913458347321,445.690490722656,0.4939024746418,-0.832264542579651,-0.251783788204193,82.9010238647461,0.0,0.0,0.0,1.0])
@@ -289,7 +272,7 @@ def fig11():
         i += 1
         if i == 2:
             a=2
-        if i > 50: raise "overlap_overflow"
+        if i > 50: raise Exception("overlap_overflow")
         overlap_plane_dists = np.mean(plane_dist[tris[overlap_idxs]], axis=1)
         to_remove_idx = overlap_idxs[np.argmax(overlap_plane_dists)]
         to_remove_tri = tris[to_remove_idx]
@@ -377,8 +360,94 @@ def fig14():
     setview([-0.177589818835258,1.11758708953857e-08,-0.984103918075562,241.179550170898,-0.791556596755981,0.59416651725769,0.142843142151833,6.04909515380859,0.584721267223358,0.804342210292816,-0.105518244206905,-647.394287109375,0.0,0.0,0.0,1.0])
     ps.show()
 
+import pyvista as pv
+def add_disc(r, c, n, color, transparency=1):
+    Q = QUAT.R_vector_to_vector(VEC.k(), n)
+    angle, axis = QUAT.to_angle_axis(Q)
+    disc = pv.Circle(r).rotate_vector(axis, rad_to_deg(angle)).translate(c).triangulate()
+    
+    ps.register_surface_mesh("cluster", disc.points, disc.regular_faces, color=color, back_face_policy="identical", transparency=transparency, material="flat")
+
+def fig15():
+    ps.set_up_dir("z_up")
+    setview([-0.825983822345734,-0.561331212520599,0.0514598786830902,0.0294836759567261,-0.411220550537109,0.662499308586121,0.626098811626434,-1.17933344841003,-0.385538339614868,0.495985388755798,-0.778048574924469,-4.64139175415039,0.0,0.0,0.0,1.0])
+    V = np.array([[0,0,-10],
+                  [0,0,0],
+                  [7,2,5],
+                  [-5,4,9]])
+    E = np.array([[0,1],
+                  [1,2],
+                  [1,3]])
+    R = np.array([1,0.5,0.4,0.2])
+
+    verts, tris = graph_contour(V,E,R,4)
+    tet = run_tetgen(verts, tris)
+
+    ps.register_volume_mesh(f"tet", tet.nodes, tet.tets, color=BLUE_GREY, interior_color=WARM_GREY, edge_width=0.5)
+    v = normalize(V[3]-V[1])
+    add_disc(1.5*R[1], 2*R[1]*v, v, BRIGHT_RED, 0.7)
+    ps.screenshot(filename="fig15.png", transparent_bg=False)
+
+    ps.show()
 
 
-fig13()
+def fig16():
+    ps.set_up_dir("z_up")
+    setview([-0.825983822345734,-0.561331212520599,0.0514598786830902,0.0294836759567261,-0.411220550537109,0.662499308586121,0.626098811626434,-1.17933344841003,-0.385538339614868,0.495985388755798,-0.778048574924469,-4.64139175415039,0.0,0.0,0.0,1.0])
+    V = np.array([[0,0,-10],
+                  [0,0,0],
+                  [7,2,5],
+                  [-7,-1,7],
+                  [-5,4,9]])
+    E = np.array([[0,1],
+                  [1,2],
+                  [1,4],
+                  [1,3]])
+    R = np.array([1,0.5,0.4, 0.3, 0.2])
+
+    verts, tris = graph_contour(V,E,R,4)
+    tet = run_tetgen(verts, tris)
+
+    ps.register_volume_mesh(f"tet", tet.nodes, tet.tets, color=BLUE_GREY, interior_color=WARM_GREY, edge_width=0.5)
+    v = normalize(V[4]-V[1])
+    add_disc(1.5*R[1], 4.5*R[1]*v, v, BRIGHT_RED, 0.7)
+    ps.screenshot(filename="fig16.png", transparent_bg=False)
+
+    ps.show()
+
+
+def fig17():
+    ps.set_up_dir("z_up")
+    setview([-0.825983822345734,-0.561331212520599,0.0514598786830902,0.0294836759567261,-0.411220550537109,0.662499308586121,0.626098811626434,-1.17933344841003,-0.385538339614868,0.495985388755798,-0.778048574924469,-4.64139175415039,0.0,0.0,0.0,1.0])
+    V = np.array([[0,0,-10],
+                  [0,0,0],
+                  [7,2,5],
+                  [-0.5,0.4,0.9],
+                  [0.5,2,5],
+                  [-7,-1,2],
+                  ])
+    E = np.array([[0,1],
+                  [1,2],
+                  [1,3],
+                  [3,4],
+                  [3,5],
+                  ])
+    R = np.array([1,0.5,0.4,0.3,0.25,0.15,0.2])
+
+    verts, tris = graph_contour(V,E,R,4)
+    tet = run_tetgen(verts, tris)
+
+    ps.register_volume_mesh(f"tet", tet.nodes, tet.tets, color=BLUE_GREY, interior_color=WARM_GREY, edge_width=0.5)
+    v = normalize(V[3]-V[1])
+    add_disc(1.5*R[1], 1.6*R[1]*v, v, BRIGHT_RED, 0.7)
+    ps.screenshot(filename="fig17.png", transparent_bg=False)
+
+    ps.show()
+
+
+
+# fig15()
+fig16()
+# fig17()
 
 print(ps.get_view_as_json())

@@ -1,12 +1,12 @@
 import numpy as np
 
-def eps_less(v1,v2):
-    return np.logical_and(~np.isclose(v1,v2), v1<v2)
+def eps_less(v1,v2, eps):
+    return np.logical_and(~np.isclose(v1,v2,atol=eps), v1<v2)
 
-def eps_less_eq(v1,v2):
-    return np.logical_or(np.isclose(v1,v2), v1<v2)
+def eps_less_eq(v1,v2, eps):
+    return np.logical_or(np.isclose(v1,v2,atol=eps), v1<v2)
 
-def line_intersect2(p0,p1,q0,q1):
+def line_intersect2(p0,p1,q0,q1, eps):
     '''
     judge if line (p0,p1) intersects with line(q0,q1)
     '''
@@ -20,9 +20,9 @@ def line_intersect2(p0,p1,q0,q1):
     u[mask] = -u[mask]
     v[mask] = -v[mask]
     d[mask] = -d[mask]
-    return np.logical_and.reduce((eps_less(0,u), eps_less(0,v), eps_less(u,d), eps_less(v,d)))
+    return np.logical_and.reduce((eps_less(0,u,eps), eps_less(0,v,eps), eps_less(u,d,eps), eps_less(v,d,eps)))
 
-def point_in_triangle2(a,b,c,p):
+def point_in_triangle2(a,b,c,p, eps):
     ac = c-a
     ab = b-a
     ap = p-a
@@ -34,9 +34,9 @@ def point_in_triangle2(a,b,c,p):
     u[mask_] = -u[mask_]
     v[mask_] = -v[mask_]
     d[mask] = -d[mask]
-    return np.logical_and.reduce((eps_less(0,u), eps_less(0,v), eps_less(u+v, d)))
+    return np.logical_and.reduce((eps_less(0,u,eps), eps_less(0,v,eps), eps_less(u+v,d,eps)))
 
-def point_in_triangle3(a,b,c,p):
+def point_in_triangle3(a,b,c,p, eps):
     ac = c-a
     ab = b-a
     ap = p-a
@@ -48,16 +48,16 @@ def point_in_triangle3(a,b,c,p):
     u[mask_] = -u[mask_]
     v[mask_] = -v[mask_]
     d[mask] = -d[mask]
-    return np.logical_and.reduce((eps_less_eq(0,u), eps_less_eq(0,v), eps_less_eq(u+v, d)))
+    return np.logical_and.reduce((eps_less_eq(0,u,eps), eps_less_eq(0,v,eps), eps_less_eq(u+v,d,eps)))
 
-def tri_intersect2(t1, t2):
+def tri_intersect2(t1, t2, eps):
     '''
     judge if two triangles in a plane intersect 
 
     '''
-    a=np.any(line_intersect2(t1[:,None,[0,1,2],None,:],t1[:,None,[1,2,0],None,:],t2[None,:,None,[0,1,2],:],t2[None,:,None,[1,2,0],:]), axis=(2,3))
-    b=np.any(point_in_triangle2(t1[:,None,0,None,:],t1[:,None,1,None,:],t1[:,None,2,None,:],t2[None,:,:,:]),axis=2)
-    c=np.any(point_in_triangle2(t2[None,:,0,None,:],t2[None,:,1,None,:],t2[None,:,2,None,:],t1[:,None,:,:]),axis=2)
-    d=np.all(point_in_triangle3(t1[:,None,0,None,:],t1[:,None,1,None,:],t1[:,None,2,None,:],t2[None,:,:,:]),axis=2)
-    e=np.all(point_in_triangle3(t2[None,:,0,None,:],t2[None,:,1,None,:],t2[None,:,2,None,:],t1[:,None,:,:]),axis=2)
+    a=np.any(line_intersect2(t1[:,None,[0,1,2],None,:],t1[:,None,[1,2,0],None,:],t2[None,:,None,[0,1,2],:],t2[None,:,None,[1,2,0],:],eps),axis=(2,3))
+    b=np.any(point_in_triangle2(t1[:,None,0,None,:],t1[:,None,1,None,:],t1[:,None,2,None,:],t2[None,:,:,:],eps),axis=2)
+    c=np.any(point_in_triangle2(t2[None,:,0,None,:],t2[None,:,1,None,:],t2[None,:,2,None,:],t1[:,None,:,:],eps),axis=2)
+    d=np.all(point_in_triangle3(t1[:,None,0,None,:],t1[:,None,1,None,:],t1[:,None,2,None,:],t2[None,:,:,:],eps),axis=2)
+    e=np.all(point_in_triangle3(t2[None,:,0,None,:],t2[None,:,1,None,:],t2[None,:,2,None,:],t1[:,None,:,:],eps),axis=2)
     return np.logical_or.reduce((a,b,c,d,e))
