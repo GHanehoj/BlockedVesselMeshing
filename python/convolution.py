@@ -8,7 +8,7 @@ import render as RENDER
 import numpy as np
 def conv_surf(V, E, R, dx):
     render_data = DATA.RenderData(V, E, R, dx)
-    if np.prod(render_data.dim) > 200*200*200:
+    if np.prod(render_data.dim) > 250*250*250:
         raise Exception("convolution too large")
     kernel, _, iso_value = KERNEL.create_kernel(kernel_type="oeltze.preim")
     grid, _ = RENDER.render_field(dx=dx

@@ -66,7 +66,7 @@ def make_tree_unordered(V, E, R):
     return root, nodes
 
 import networkx as nx
-def make_tree_unordered2(V, E, R):
+def make_tree_unordered2(V, E, R, find_root=False):
     """
     Factory function for creating a tree data structure of an edge-indexed array representation of a vascular
     skeleton tree instance.
@@ -81,25 +81,36 @@ def make_tree_unordered2(V, E, R):
     for e in E:
         G.add_edge(e[0], e[1])
 
+    if not nx.is_connected(G):
+        print("not connected, choosing largest component...")
+        idx = np.argmax([len(c) for c in nx.connected_components(G)])
+        G = nx.subgraph(G, list(nx.connected_components(G))[idx]).copy()
     if not nx.is_tree(G):
         print("cycles detected, removing...")
-        remove_cycles(G)
+        remove_cycles(G, len(V))
     assert(nx.is_tree(G))
 
-    T = nx.bfs_tree(G, 0)
+    v0 = 0
+    if find_root or not G.has_node(0):
+        print("choosing larges radius as root...")
+        v0 = [i for i in G.nodes][np.argmax([G.nodes[i]['r'] for i in G.nodes])]
+
+    T = nx.bfs_tree(G, v0)
 
 
     nodes = [None]*len(T.nodes)
+    idxs = [i for i in T.nodes]
     def make_node(i, p):
-        nodes[i] = TreeNode()
-        nodes[i].index = i
-        nodes[i].position = G.nodes[i]['v']
-        nodes[i].radius = G.nodes[i]['r']
-        nodes[i].parent = nodes[p]
+        idx_i = idxs.index(i)
+        nodes[idx_i] = TreeNode()
+        nodes[idx_i].index = idx_i
+        nodes[idx_i].position = G.nodes[i]['v']
+        nodes[idx_i].radius = G.nodes[i]['r']
+        nodes[idx_i].parent = nodes[idxs.index(p)] if p != -1 else None
         for j in T.neighbors(i):
             make_node(j, i)
-            nodes[i].children.append(nodes[j])
-    make_node(0, -1)
+            nodes[idx_i].children.append(nodes[idxs.index(j)])
+    make_node(v0, -1)
     root = nodes[0]
     return root, nodes
 
@@ -120,22 +131,32 @@ def make_tree_unordered2(V, E, R):
 #     for j in G.neighbors(0):
 #         dfs(0, j)
 
-def remove_cycles(G):
+def remove_cycles(G, n):
     edges = list(nx.minimum_spanning_edges(G, data=False))
     # T = nx.minimum_spanning_tree(G)
 
     to_remove = []
     for e in G.edges:
-        if e not in edges:
-            i = min(e)
-            j = max(e)
-            to_remove.append((i,j))
+        if e not in edges and (e[1],e[0]) not in edges:
+            # i = min(e)
+            # j = max(e)
+            to_remove.append(e)
 
+    k = n
     for i,j in to_remove:
-        k = len(G.nodes)
         G.add_node(k, v=G.nodes[j]["v"], r=G.nodes[j]["r"])
         G.remove_edge(i,j)
         G.add_edge(i,k)
+        k += 1
+def prune_huge_leaves(root):
+    def _prune_huge_leaves_rec(node):
+        pruned_children = []
+        for child in node.children:
+            _prune_huge_leaves_rec(child)
+            if len(child.children) > 0 or child.radius < 1.5*child.parent.radius:
+                pruned_children.append(child)
+        node.children = pruned_children
+    _prune_huge_leaves_rec(root)
 
 def prune_tiny_leaves(root, threshold):
     def prune_tiny_leaves_rec(node):

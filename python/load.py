@@ -21,6 +21,11 @@ def load_skeleton_data(folder: str):
 
     return V, E, R
 
+def load_skeleton(folder: str):
+    V, E, R = load_skeleton_data(folder)
+    root, _ = TREE.make_tree(V, E, R)
+    return root
+
 def save_skeleton_data(V,E,R, folder: str):
     np.save(folder+'/vertex_array.npy', V)
     np.save(folder+'/edge_array.npy', E)
@@ -32,7 +37,7 @@ def load_treenet_data(file: str):
     R = data[:, 3]
     return V, R
 
-def load_vesselgen_data(folder: str):
+def load_vesselgen_data(folder: str, rdp_eps):
     V = np.load(folder+"_coords.npy")
     E = np.load(folder+"_connections.npy")
     Re = np.load(folder+"_radii.npy")
@@ -45,7 +50,13 @@ def load_vesselgen_data(folder: str):
         n_acc[e[1]] += 1
     R = r_acc/n_acc
 
-    return V, E, R
+    E = np.vstack((E, [[290,758]]))
+
+    root, _ = TREE.make_tree_unordered2(V, E, R, True)
+    TREE.simplify_edges(root, rdp_eps)
+    TREE.merge_groupings(root, 0.7)
+
+    return root
 
 def load_vesselgraph_data(vertices_file: str, edges_file: str):
     vertices_data = np.genfromtxt(vertices_file, delimiter=";", skip_header=1)
@@ -60,6 +71,7 @@ def load_vesselgraph_data(vertices_file: str, edges_file: str):
         r_acc[e[1]] += r
         n_acc[e[0]] += 1
         n_acc[e[1]] += 1
+    n_acc[n_acc == 0] = 1
     R = r_acc/n_acc
 
     root, _ = TREE.make_tree_unordered2(V, E, R)
@@ -141,6 +153,7 @@ def load_hepatic_vtk(folder):
     R = r_acc/n_acc
 
     root, _ = TREE.make_tree_unordered2(V, E, R)
+    TREE.prune_huge_leaves(root)
     TREE.prune_tiny_offshoots(root)
     TREE.simplify_edges(root, 0.08)
     TREE.merge_groupings(root, 0.7)

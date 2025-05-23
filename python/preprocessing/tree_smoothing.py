@@ -38,9 +38,11 @@ def angle_between(v1, v2):
     return torch.arccos(torch.clip(torch.einsum("...k,...k->...",v1_u, v2_u), -1.0, 1.0))
 
 def laplacian_smooth(V, neighbours, lr):
+    a=2
     internal_mask = np.sum(neighbours != -1, axis=1) > 1
 
     centers = V[neighbours[internal_mask]]
+    centers[neighbours[internal_mask] == -1] = torch.nan
     arms = centers-V[internal_mask, None, :]
     mids = (centers[:,[0,1,2],:] + centers[:,[1,2,0],:])/2
 
@@ -48,13 +50,14 @@ def laplacian_smooth(V, neighbours, lr):
 
     # angs = angle_between(arms[:,:,None,:], arms[:,None,:,:])
     weights = torch.pi/torch.maximum(angs, torch.tensor(0.01))
-    weights /= torch.sum(weights,dim=1)[:,None]
+    weights /= torch.nansum(weights,dim=1)[:,None]
 
-    D = torch.sum(weights[:,:,None]*mids, dim=1)-V[internal_mask]
+    D = torch.nansum(weights[:,:,None]*mids, dim=1)-V[internal_mask]
 
     V[internal_mask] += cap_diff(lr * D)
 
 def repel_smooth(V, R, neighbours, lr):
+    a=2
     centers = V[neighbours]
     arms = centers-V[:, None, :]
 
@@ -90,8 +93,9 @@ def calc_g_spaces(V, E, R):
 
     return g_space
 
+
 def barrier_kernel(d, h):
-    return 3*B3(2 * d / h)/(2 * d * d)
+    return 3*B3(2 * d / h)/(2 * d * d+1e-5)
 def B3(u):
     return torch.where(u < 1, 2/3 - u*u + 1/2 * u*u*u,
            torch.where(u < 2, 1/6 * (2-u)*(2-u)*(2-u),
@@ -143,7 +147,7 @@ def smooth(V, E, R, iter, lap_lr, rep_lr, bar_lr, save_fn = None):
     E_torch = torch.tensor(E, device=device)
     R_torch = torch.tensor(R, device=device)
     with torch.no_grad():
-        # g_spaces = calc_g_spaces(V_torch.cpu().detach().numpy(), E, R)
+        g_spaces = calc_g_spaces(V_torch.cpu().detach().numpy(), E, R)
         # g_spaces = np.zeros((len(E),len(E)))
         neighbours = compute_neighbour_matrix(V_torch, E_torch)
         changes = []
@@ -154,23 +158,23 @@ def smooth(V, E, R, iter, lap_lr, rep_lr, bar_lr, save_fn = None):
             V_lap = V_torch.clone().detach()
             repel_smooth(V_torch, R_torch, neighbours, rep_lr)
 
-            # V_rep = V_torch.clone().detach()
-            # barrier_val = barrier_optim(V_torch, E_torch, R_torch, g_spaces, bar_lr)
+            V_rep = V_torch.clone().detach()
+            barrier_val = barrier_optim(V_torch, E_torch, R_torch, g_spaces, bar_lr)
 
             max_change_lap = torch.max(torch.linalg.vector_norm(V_prev-V_lap, dim=1)).cpu().detach().numpy()
-            max_change_rep = torch.max(torch.linalg.vector_norm(V_lap-V_torch, dim=1)).cpu().detach().numpy()
-            # max_change_bar = torch.max(torch.linalg.vector_norm(V_torch-V_torch, dim=1)).cpu().detach().numpy()
+            max_change_rep = torch.max(torch.linalg.vector_norm(V_lap-V_rep, dim=1)).cpu().detach().numpy()
+            max_change_bar = torch.max(torch.linalg.vector_norm(V_rep-V_torch, dim=1)).cpu().detach().numpy()
             mean_change_lap = torch.mean(torch.linalg.vector_norm(V_prev-V_lap, dim=1)).cpu().detach().numpy()
-            mean_change_rep = torch.mean(torch.linalg.vector_norm(V_lap-V_torch, dim=1)).cpu().detach().numpy()
-            # mean_change_bar = torch.mean(torch.linalg.vector_norm(V_torch-V_torch, dim=1)).cpu().detach().numpy()
-            changes.append([max_change_lap, max_change_rep, mean_change_lap, mean_change_rep])
-            print(f"iteration {i} --- {max_change_lap:.4f}, {max_change_rep:.4f}, {mean_change_lap:.4f}, {mean_change_rep:.4f}")
+            mean_change_rep = torch.mean(torch.linalg.vector_norm(V_lap-V_rep, dim=1)).cpu().detach().numpy()
+            mean_change_bar = torch.mean(torch.linalg.vector_norm(V_rep-V_torch, dim=1)).cpu().detach().numpy()
+            changes.append([max_change_lap, max_change_rep, max_change_bar, mean_change_lap, mean_change_rep, mean_change_bar, barrier_val])
+            print(f"iteration {i} --- {max_change_lap:.4f}, {max_change_rep:.4f}, {max_change_bar:.4f}, {mean_change_lap:.4f}, {mean_change_rep:.4f}, {mean_change_bar:.4f}, {barrier_val:.4f}")
 
             if save_fn and (i < 5 or (i < 100 and i % 5 == 0) or i % 50 == 0):
                 save_fn(V_torch.cpu().detach().numpy(), E, R, changes, i)
-            # if i % 50 == 49 and i != iter-1:
-            #     g_spaces = np.array([])
-            #     gc.collect()
-            #     g_spaces = calc_g_spaces(V_torch.cpu().detach().numpy(), E, R)
+            if i % 50 == 49 and i != iter-1:
+                g_spaces = np.array([])
+                gc.collect()
+                g_spaces = calc_g_spaces(V_torch.cpu().detach().numpy(), E, R)
 
     return V_torch.cpu().detach().numpy(), E, R, changes

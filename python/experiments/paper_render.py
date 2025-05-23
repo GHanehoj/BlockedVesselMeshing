@@ -7,7 +7,7 @@ import meshio
 import data as DATA
 import clusters as CLUSTERS
 import tree as TREE
-from tools.contouring import cluster_contour, graph_contour
+# from tools.contouring import cluster_contour, graph_contour
 from blocked import run_tetgen
 from tools.mesh_util import MultiTetMesh, load_tet, load_tri
 from tools.numpy_util import mk_mask, normalize, rad_to_deg
@@ -270,8 +270,6 @@ def fig11():
 
     while len(overlap_idxs) > 0:
         i += 1
-        if i == 2:
-            a=2
         if i > 50: raise Exception("overlap_overflow")
         overlap_plane_dists = np.mean(plane_dist[tris[overlap_idxs]], axis=1)
         to_remove_idx = overlap_idxs[np.argmax(overlap_plane_dists)]
@@ -315,15 +313,31 @@ def fig11():
     ps.show()
 
 def fig12():
-    ps.set_up_dir("y_up")
-    setview([-0.177589818835258,1.11758708953857e-08,-0.984103918075562,506.248168945312,-0.791556596755981,0.59416651725769,0.142843142151833,97.2533416748047,0.584721267223358,0.804342210292816,-0.105518244206905,-1342.8515625,0.0,0.0,0.0,1.0])
+    ps.set_up_dir("z_up")
     ps.set_shadow_darkness(0.45)
     ps.set_SSAA_factor(1)
-    tet = load_tet("../../data/meshes/full_4.mesh")
+    # tri = load_tri("/media/data/data/meshes/meshes/brain_vg_3_surf.mesh")
+    # tri = load_tri("/media/data/data/meshes/meshes/tree_ahn_3_surf.mesh")
+    tri = load_tri("/media/data/data/meshes/attic//liver/liver_4_surf.mesh")
     print("loaded")
-    ps.register_volume_mesh("cluster", tet.nodes, tet.tets[:100000], material="flat",color=PASTEL_RED, interior_color=WARM_GREY, edge_width=0.5)
+    ps.register_surface_mesh("cluster", tri.nodes, tri.tris, color=PASTEL_RED, edge_width=0.5, back_face_policy="identical")
     print("added")
+
     ps.show()
+
+def fig12a():
+    ps.set_up_dir("z_up")
+    ps.set_shadow_darkness(0.45)
+    ps.set_SSAA_factor(1)
+    # tet = load_tet("../../data/meshes/brain_vg2_3.mesh")
+    tet = load_tet("/media/data/data/meshes/meshes/lung_3_culled.mesh")
+    print("loaded")
+    ps.register_volume_mesh("cluster", tet.nodes, tet.tets, material="flat",color=PASTEL_BLUE, interior_color=WARM_GREY, edge_width=0.5)
+    print("added")
+    setview([-0.571226894855499,0.82079154253006,6.27478584647179e-08,83.1867294311523,-0.494486629962921,-0.344136148691177,0.798156201839447,-323.962554931641,0.655120491981506,0.455928266048431,0.602451026439667,-150.457702636719,0.0,0.0,0.0,1.0])
+
+    ps.show()
+    a=2
 
 def fig13():
     ps.set_up_dir("y_up")
@@ -446,8 +460,6 @@ def fig17():
 
 
 
-# fig15()
-fig16()
-# fig17()
+fig12()
 
 print(ps.get_view_as_json())

@@ -53,6 +53,9 @@ def show_clusters(clusters):
         plotter.add_point_labels(cluster.nodes[0].position, [str(i)])
     plotter.show()
 
+def show_cluster_graph(cluster):
+    show_graph(cluster.V, cluster.E, cluster.R)
+
 def show_graph(V,E,R):
     plotter = pv.Plotter()
     plotter.add_lines(V[E].reshape(-1,3), color="k")

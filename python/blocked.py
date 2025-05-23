@@ -105,10 +105,10 @@ def process_end(mesh: TetMesh, flow_data: FlowData):
     end.clean()
     edge.clean()
 
-    import pyvista as pv
-    grid = pv.UnstructuredGrid({pv.CellType.TETRA: mesh.tets}, mesh.nodes)
-    bodies = grid.split_bodies()
-    assert(len(bodies) == 1)
+    # import pyvista as pv
+    # grid = pv.UnstructuredGrid({pv.CellType.TETRA: mesh.tets}, mesh.nodes)
+    # bodies = grid.split_bodies()
+    # assert(len(bodies) == 1)
 
     return EndSlice(end, edge, flow_data)
 
@@ -163,7 +163,7 @@ def calc_normal_towards(tri, p):
 
     return normal
 
-def generate_cluster_mesh(cluster, res):
+def generate_cluster_mesh(cluster, res, uid):
     centre = np.mean(cluster.V, axis=0)
     sz = 100/np.median(cluster.R)
 
@@ -174,11 +174,11 @@ def generate_cluster_mesh(cluster, res):
     dx = ((2*np.min(radii))/res)*sz
 
     grid = CONV.conv_surf(V, E, R, dx)
-    if grid.dim[0]*grid.dim[1]*grid.dim[2] > 200*200*200:
-        a=2
+    if grid.dim[0]*grid.dim[1]*grid.dim[2] > 250*250*250:
+        raise Exception("grid too large")
     verts, tris = contour(grid)
 
-    mesh = run_tetgen(verts, tris, False)
+    mesh = run_tetgen(verts, tris, uid, False)
 
     mesh.nodes = np.float128(mesh.nodes)
     mesh.nodes /= sz
@@ -186,14 +186,14 @@ def generate_cluster_mesh(cluster, res):
     mesh.nodes = np.float64(mesh.nodes)
     return mesh
 
-def run_tetgen(verts, tris, preserve_surface=True):
+def run_tetgen(verts, tris, uid, preserve_surface=True):
     mesh = meshio.Mesh(verts, [("triangle", tris)])
-    mesh.write("_temp.mesh")
+    mesh.write(f"_temp{uid}.mesh")
 
     options = "-QENFgq1.4/10" + ("Y" if preserve_surface else "")
-    _tetgen(options)
+    _tetgen(options, uid)
 
-    res = meshio.read("_temp.1.mesh")
+    res = meshio.read(f"_temp{uid}.1.mesh")
     if len(res.points) == 0:
         raise Exception("tetgen failed")
 
@@ -208,24 +208,22 @@ def run_tetgen(verts, tris, preserve_surface=True):
 
     return tet
 
-def _tetgen(options):
-    proc = subprocess.run(["tetgen", options, "_temp.mesh"], capture_output=True)
+def _tetgen(options, uid):
+    proc = subprocess.run(["tetgen", options, f"_temp{uid}.mesh"], capture_output=True)
     if (proc.returncode == 0): return
 
     options = "-QENFgqY"
-    proc = subprocess.run(["tetgen", options, "_temp.mesh"], capture_output=True)
+    proc = subprocess.run(["tetgen", options, f"_temp{uid}.mesh"], capture_output=True)
     if (proc.returncode == 0): return
 
     options = "-QENFgq"
-    proc = subprocess.run(["tetgen", options, "_temp.mesh"], capture_output=True)
+    proc = subprocess.run(["tetgen", options, f"_temp{uid}.mesh"], capture_output=True)
     if (proc.returncode == 0): return
 
     raise Exception("tetgen failed")
 
-def compute_cluster_meshes(cluster, res=3):
-    if cluster.nodes[0].index == 31:
-        a=2
-    mesh = generate_cluster_mesh(cluster, res)
+def compute_cluster_meshes(cluster, res, uid):
+    mesh = generate_cluster_mesh(cluster, res, uid)
 
     out_ends = [None]*len(cluster.outflows)
     for i, outflow in enumerate(cluster.outflows):
@@ -399,15 +397,23 @@ def strip(end, cyl_edge, r):
             extra_tri_meshes.append(TriMesh(nodes, tris))
         elif len(unmapped_idxs) == 2:
             idxs = [unmapped_idxs[0]-1] + unmapped_idxs + [unmapped_idxs[len(unmapped_idxs)-1]+1]
-            # verts = end_projs2[idxs]
-            # t = tr.triangulate({'vertices': verts})
             nodes = end_nodes[idxs]
             nodes = transform_inv(nodes)
             tris = np.array([[0,1,2], [2,3,0]])
-            # tris = t['triangles']
             extra_tri_meshes.append(TriMesh(nodes, tris))
         else:
-            raise Exception("too complex unmapped region")
+            try:
+                import triangle as tr
+                idxs = [unmapped_idxs[0]-1] + unmapped_idxs + [unmapped_idxs[len(unmapped_idxs)-1]+1]
+                t = tr.triangulate({'vertices': end_projs2[idxs]})
+
+                nodes = end_nodes[idxs]
+                nodes = transform_inv(nodes)
+                tris = t['triangles']
+
+                extra_tri_meshes.append(TriMesh(nodes, tris))
+            except:
+                raise Exception("too complex unmapped region")
 
     remaining_end_idxs = np.where(np.isfinite(end_to_cyl_map))[0]
     remaining_end_projs = end_projs2[remaining_end_idxs]
@@ -457,8 +463,8 @@ def strip(end, cyl_edge, r):
     if len(extra_tri_meshes) > 0:
         strip_mesh = merge_tri_meshes([strip_mesh] + extra_tri_meshes)
     return strip_mesh
-
-def make_connector(end1: EndSlice, end2: EndSlice) -> TetMesh:
+import pymeshfix
+def make_connector(end1: EndSlice, end2: EndSlice, uid) -> TetMesh:
     edge_cnt = int(np.ceil((end1.edge.segs.shape[0]+end2.edge.segs.shape[0])/2))
 
     conn_mesh, conn_edge1, conn_edge2 = connector_tube(end1, end2, edge_cnt)
@@ -471,7 +477,11 @@ def make_connector(end1: EndSlice, end2: EndSlice) -> TetMesh:
     centre = np.mean(connector_tri.nodes, axis=0)
     sz = 100/np.median([end1.flow_data.radius, end2.flow_data.radius])
 
-    tet = run_tetgen((connector_tri.nodes-centre)*sz, connector_tri.tris)
+    verts = (connector_tri.nodes-centre)*sz
+    tris = connector_tri.tris
+    verts, tris = pymeshfix.clean_from_arrays(verts, tris)
+
+    tet = run_tetgen(verts, tris, uid)
 
     tet.nodes = np.float128(tet.nodes)
     tet.nodes /= sz

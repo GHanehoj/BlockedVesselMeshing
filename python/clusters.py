@@ -36,7 +36,6 @@ class Cluster:
         self.R = np.array([node.radius])
         if cut_dist is None:
             self.in_data = None
-            self.add_node(node.parent, 0)
         else:
             self.in_data = FlowData(node, node.parent, cut_dist)
             self._add_flow_to_graph(node, node.parent, 0, cut_dist)
@@ -81,9 +80,9 @@ class Cluster:
         self.V[1] = pos
         self.R[1] = rad
 
-def make_cluster(node, done_f, cut_dist=None):
+def make_cluster(node, done_f=None, cut_dist=None):
     cluster = Cluster(node, cut_dist)
-    if cluster.nodes[0].index == 3401:
+    if node.index == 5058:
         a=2
     expand_cluster(cluster, node, 0, done_f)
     return cluster
@@ -111,7 +110,7 @@ def expand_cluster(cluster, node, node_idx, done_f):
         for child in node.children:
             cut_dist, slack, child_cut_dist = calc_cut_dist(node, child)
             if cut_dist is not None:
-                outflows.append((node, node_idx, child, cut_dist, slack, child_cut_dist))
+                outflows.append((node, node_idx, child, cut_dist, slack, child_cut_dist, FlowData(node, child, cut_dist), FlowData(child, node, child_cut_dist)))
             else:
                 child_idx = cluster.add_node(child, node_idx)
                 _expand_cluster(child, child_idx)
@@ -124,19 +123,18 @@ def expand_cluster(cluster, node, node_idx, done_f):
 
     def update_outflow_adjustments():
         outflow_adjustments.clear()
-        for (node, _, child, cut_dist, slack, _) in outflows:
-            outflow_adjustments.append(calc_outflow_adjustment(cluster, node, child, cut_dist, slack))
+        for idx in range(len(outflows)):
+            outflow_adjustments.append(calc_outflow_adjustment(cluster, outflows, idx))
     def update_children():
         for idx in range(len(child_clusters), len(outflows)):
-            (_, _, child, _, _, child_cut_dist) = outflows[idx]
+            (_, _, child, _, _, child_cut_dist, _, _) = outflows[idx]
             child_clusters.append(make_cluster(child, done_f, child_cut_dist))
         for idx in range(len(outflow_adjustments), len(outflows)):
-            (node, _, child, cut_dist, slack, _) = outflows[idx]
-            outflow_adjustments.append(calc_outflow_adjustment(cluster, node, child, cut_dist, slack))
+            outflow_adjustments.append(calc_outflow_adjustment(cluster, outflows, idx))
 
     def update_inflow_adjustments():
         child_inflow_adjustments.clear()
-        for child_cluster, (_, _, _, _, slack, _), out_adj in zip(child_clusters, outflows, outflow_adjustments, strict=True):
+        for child_cluster, (_, _, _, _, slack, _, _, _), out_adj in zip(child_clusters, outflows, outflow_adjustments, strict=True):
             child_inflow_adjustments.append(calc_inflow_adjustment(child_cluster, slack*(1-out_adj)))
 
 
@@ -144,7 +142,7 @@ def expand_cluster(cluster, node, node_idx, done_f):
         update_outflow_adjustments()
         while np.any(np.isnan(outflow_adjustments)):
             idx = np.argmax(np.isnan(outflow_adjustments))
-            (_, node_idx, child, _, _, _) = outflows[idx]
+            (_, node_idx, child, _, _, _, _, _) = outflows[idx]
             del outflows[idx]
             if len(child_clusters) > idx: del child_clusters[idx]
 
@@ -160,7 +158,7 @@ def expand_cluster(cluster, node, node_idx, done_f):
         while np.any(np.isnan(child_inflow_adjustments)):
             did_change = True
             idx = np.argmax(np.isnan(child_inflow_adjustments))
-            (_, node_idx, child, _, _, _) = outflows[idx]
+            (_, node_idx, child, _, _, _, _, _) = outflows[idx]
             del child_clusters[idx]
             del outflows[idx]
             del outflow_adjustments[idx]
@@ -174,14 +172,15 @@ def expand_cluster(cluster, node, node_idx, done_f):
         if did_change: adjust()
     adjust()
 
-    for _ in cluster.nodes:
-        done_f()
+    if done_f is not None:
+        for _ in cluster.nodes:
+            done_f()
 
-    for child_cluster, (node, node_idx, child, cut_dist, slack, _), out_adj, in_adj in zip(child_clusters, outflows, outflow_adjustments, child_inflow_adjustments, strict=True):
+    for child_cluster, (node, node_idx, child, cut_dist, slack, _, _, _), out_adj, in_adj in zip(child_clusters, outflows, outflow_adjustments, child_inflow_adjustments, strict=True):
         if in_adj != 0:
             child_cluster.adjust_inflow(in_adj*slack*(1-out_adj))
         cluster.add_outflow(child_cluster, node, child, node_idx, cut_dist + out_adj*slack)
-
+    ## TODO: outflows can still collide with each other.
 
 def calc_cut_dist(node, child):
     connector = child.position - node.position
@@ -199,7 +198,7 @@ def calc_cut_dist(node, child):
 
 def min_len_all(node, child):
     all_neighbours = node.children + ([node.parent] if node.parent is not None else [])
-    return node.radius + np.max([0.6*node.radius]+[min_len_ang(node, child, other) for other in all_neighbours if child != other])
+    return np.max([1.5*node.radius]+[min_len_ang(node, child, other) for other in all_neighbours if child != other])
 
 def min_len_ang(node, child, other):
     child_conn = child.position - node.position
@@ -211,29 +210,29 @@ def min_len_ang(node, child, other):
     if abs((node.radius-child.radius)/np.linalg.norm(child_conn)) > 1: return 0
     if abs((node.radius-other.radius)/np.linalg.norm(other_conn)) > 1: return 0
 
-    child_ang_offset = np.arcsin((node.radius-child.radius)/np.linalg.norm(child_conn))
-    other_ang_offset = np.arcsin((node.radius-other.radius)/np.linalg.norm(other_conn))
+    child_ang_offset = np.arcsin(abs((node.radius-child.radius))/np.linalg.norm(child_conn))
+    other_ang_offset = np.arcsin(abs((node.radius-other.radius))/np.linalg.norm(other_conn))
 
     phi = (np.pi-child_ang_offset-other_ang_offset-theta)/2
 
-    if (phi > np.pi):
-        a=2
-
     d = node.radius/np.cos(phi)
 
-    psi = (np.pi+child_ang_offset-other_ang_offset-phi)/2
-    if (psi > np.pi):
+    psi = (np.pi+child_ang_offset-other_ang_offset-theta)/2
+    psi2 = phi+child_ang_offset
+
+    if not np.isclose(psi, psi2):
         a=2
 
     split_dist = np.sin(psi)*d
 
     return 1.2*split_dist
 
-def calc_outflow_adjustment(cluster, node, child, cut_dist, slack):
-    flow_data = FlowData(node, child, cut_dist)
+def calc_outflow_adjustment(cluster, outflows, idx):
+    (node, _, _, _, slack, _, flow_data, _) = outflows[idx]
+    other_flows = [(outflow[0], outflow[6]) for i, outflow in enumerate(outflows) if i != idx]
     for i in np.linspace(0, 1, 5):
         point = flow_data.point + i*slack*flow_data.dir
-        if not has_flow_intersection(cluster, node, point, flow_data.radius): # Assume radius difference is neglegible for now. TODO
+        if not has_flow_intersection(cluster, other_flows, node, point, flow_data.radius): # Assume radius difference is neglegible for now. TODO
             return i
     return np.nan
 
@@ -241,11 +240,11 @@ def calc_inflow_adjustment(cluster, slack):
     flow_data = cluster.in_data
     for i in np.linspace(0, 1, 5):
         point = flow_data.point + i*slack*flow_data.dir
-        if not has_flow_intersection(cluster, cluster.nodes[0], point, flow_data.radius): # Assume radius difference is neglegible for now. TODO
+        if not has_flow_intersection(cluster, [], cluster.nodes[0], point, flow_data.radius): # Assume radius difference is neglegible for now. TODO
             return i
     return np.nan
 
-def has_flow_intersection(cluster : Cluster, node, flow_point, flow_radius):
+def has_flow_intersection(cluster : Cluster, other_flows, node, flow_point, flow_radius):
     for i in range(len(cluster.E)):
         e = cluster.E[i]
         p1, p2 = cluster.V[e]
@@ -255,6 +254,16 @@ def has_flow_intersection(cluster : Cluster, node, flow_point, flow_radius):
         dist, t = point_seg_intersect(flow_point, p1, p2)
         r = lerp(r1, r2, t)
         if dist < 1.5*(r + flow_radius):
+            return True
+    for i in range(len(other_flows)):
+        other_node, other_flow_data = other_flows[i]
+        if node == other_node: continue
+        p1 = other_node.position
+        p2 = other_flow_data.point
+        r1 = other_node.radius
+        r2 = other_flow_data.radius
+        dist, t = point_seg_intersect(flow_point, p1, p2)
+        if dist < (r2 + flow_radius):
             return True
     return False
 
@@ -280,9 +289,10 @@ def cluster_list(root : Cluster):
 
 def cluster_stats(root : Cluster, res):
     clusters = cluster_list(root)
-    stats = np.empty((len(clusters), 1))
+    stats = np.empty((len(clusters), 2))
     for i, cluster in enumerate(clusters):
         stats[i,0] = size_estimate(cluster, res)
+        stats[i,1] = len(cluster.nodes)
     return stats
 
 def size_estimate(cluster, res):
