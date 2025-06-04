@@ -153,10 +153,10 @@ def load_hepatic_vtk(folder):
     R = r_acc/n_acc
 
     root, _ = TREE.make_tree_unordered2(V, E, R)
-    TREE.prune_huge_leaves(root)
     TREE.prune_tiny_offshoots(root)
     TREE.simplify_edges(root, 0.08)
     TREE.merge_groupings(root, 0.7)
+    TREE.limit_radius_growth(root, 2)
 
     return root
 

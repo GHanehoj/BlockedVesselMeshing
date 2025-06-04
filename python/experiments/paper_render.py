@@ -460,6 +460,6 @@ def fig17():
 
 
 
-fig12()
+fig12a()
 
 print(ps.get_view_as_json())

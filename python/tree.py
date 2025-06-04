@@ -148,15 +148,13 @@ def remove_cycles(G, n):
         G.remove_edge(i,j)
         G.add_edge(i,k)
         k += 1
-def prune_huge_leaves(root):
-    def _prune_huge_leaves_rec(node):
-        pruned_children = []
+def limit_radius_growth(root, max_mul):
+    def _limit_radius_growth_rec(node):
         for child in node.children:
-            _prune_huge_leaves_rec(child)
-            if len(child.children) > 0 or child.radius < 1.5*child.parent.radius:
-                pruned_children.append(child)
-        node.children = pruned_children
-    _prune_huge_leaves_rec(root)
+            if child.radius > max_mul*node.radius:
+                child.radius = max_mul*node.radius
+            _limit_radius_growth_rec(child)
+    _limit_radius_growth_rec(root)
 
 def prune_tiny_leaves(root, threshold):
     def prune_tiny_leaves_rec(node):
