@@ -31,12 +31,6 @@ def save_skeleton_data(V,E,R, folder: str):
     np.save(folder+'/edge_array.npy', E)
     np.save(folder+'/vertex_radius_array.npy', R)
 
-def load_treenet_data(file: str):
-    data = np.genfromtxt(file, delimiter=" ")
-    V = data[:, 0:3]
-    R = data[:, 3]
-    return V, R
-
 def load_vesselgen_data(folder: str, rdp_eps):
     V = np.load(folder+"_coords.npy")
     E = np.load(folder+"_connections.npy")
@@ -80,22 +74,6 @@ def load_vesselgraph_data(vertices_file: str, edges_file: str):
     # TREE.merge_groupings(root, 0.7)
 
     return root
-
-def distfunc(pnt, start, end):
-    line = end-start
-    vec = pnt-start
-    l = np.linalg.norm(line)
-    dir = line/l
-    t = np.dot(dir, vec)/l
-    if t < 0.0:
-        t = 0.0
-    elif t > 1.0:
-        t = 1.0
-    nearest = start + t*l*dir
-    diff = nearest-pnt
-    diff[3] *= np.linalg.norm(line[:3])
-    dist = np.linalg.norm(diff)
-    return dist
 
 def load_segmented_curves(folder: str, rdp_eps):
     files = os.listdir(folder)
