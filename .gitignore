@@ -1,5 +1,6 @@
 __pycache__/
 .attic/*
+.vscode/*
 data/figures/*
 data/meshes/*
 data/tmp/*
