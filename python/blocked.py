@@ -4,7 +4,6 @@ import rainbow.math.intersection as INSCT
 import rainbow.math.vector3 as VEC
 from tools.mesh_util import SegMesh, TriMesh, TetMesh
 from clusters import FlowData
-from tools.contouring import contour
 import convolution as CONV
 from tools.numpy_util import angle_in_plane, angle_xy, lerp
 from tools.mesh_util import merge_tri_meshes, flatness
@@ -176,7 +175,7 @@ def generate_cluster_mesh(cluster, res, uid):
     grid = CONV.conv_surf(V, E, R, dx)
     if grid.dim[0]*grid.dim[1]*grid.dim[2] > 250*250*250:
         raise Exception("grid too large")
-    verts, tris = contour(grid)
+    verts, tris = CONV.contour(grid)
 
     mesh = run_tetgen(verts, tris, uid, False)
 

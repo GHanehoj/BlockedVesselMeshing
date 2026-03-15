@@ -7,7 +7,6 @@ import meshio
 import data as DATA
 import clusters as CLUSTERS
 import tree as TREE
-# from tools.contouring import cluster_contour, graph_contour
 from blocked import run_tetgen
 from tools.mesh_util import MultiTetMesh, load_tet, load_tri
 from tools.numpy_util import mk_mask, normalize, rad_to_deg

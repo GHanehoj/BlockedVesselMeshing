@@ -23,11 +23,3 @@ def taubin_smoothing(V, neighbours, fixed_mask = None, lamb = 0.5, nu = 0.5, ite
             V[mask] += lamb * d
         else:
             V[mask] -= nu * d
-
-def taubin_smoothing_nomask(V, neighbours, lamb = 0.5, nu = 0.5, iter=50):
-    for i in range(iter):
-        d = neighbours@V - V
-        if i % 2 == 0:
-            V += lamb * d
-        else:
-            V -= nu * d

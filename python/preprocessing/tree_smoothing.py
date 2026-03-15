@@ -48,7 +48,6 @@ def laplacian_smooth(V, neighbours, lr):
 
     angs = angle_between(arms[:,[0,1,2],:], arms[:,[1,2,0],:])
 
-    # angs = angle_between(arms[:,:,None,:], arms[:,None,:,:])
     weights = torch.pi/torch.maximum(angs, torch.tensor(0.01))
     weights /= torch.nansum(weights,dim=1)[:,None]
 
@@ -148,7 +147,6 @@ def smooth(V, E, R, iter, lap_lr, rep_lr, bar_lr, save_fn = None):
     R_torch = torch.tensor(R, device=device)
     with torch.no_grad():
         g_spaces = calc_g_spaces(V_torch.cpu().detach().numpy(), E, R)
-        # g_spaces = np.zeros((len(E),len(E)))
         neighbours = compute_neighbour_matrix(V_torch, E_torch)
         changes = []
         for i in range(iter):

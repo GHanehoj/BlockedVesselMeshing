@@ -1,7 +1,6 @@
 import sys
 import os
 sys.path.append(os.path.abspath('../'))
-from typing import List
 import numpy as np
 
 def create_folders_if_not_exist(filepath: str) -> None:
@@ -13,26 +12,26 @@ def create_folders_if_not_exist(filepath: str) -> None:
         os.makedirs(directory)
 
 
-def is_valid_file_extension(filepath: str, valid_extensions: List[str]) -> bool:
-    # Extract file extension from the given file path
-    _, extension = os.path.splitext(filepath)
-
-    # Check if the file extension is in the list of valid extensions
-    return extension.lower() in valid_extensions
-
-
-def file_exists(filename):
-    return os.path.exists(filename)
-
-
 def save_npy(file, npy):
     create_folders_if_not_exist(file)
     np.save(file, npy)
 
-def save_skeleton_data(V, E, R, vertex_array_file: str, edge_array_file: str, vertex_radius_file: str):
-    create_folders_if_not_exist(vertex_array_file)
-    create_folders_if_not_exist(edge_array_file)
-    create_folders_if_not_exist(vertex_radius_file)
-    np.save(vertex_array_file, V)
-    np.save(edge_array_file, E)
-    np.save(vertex_radius_file, R)
+
+def load_skeleton_data(folder: str):
+    """
+    Load skeleton data from numpy arrays.
+
+    :param folder:                 The folder containing 3 graph data files.
+    :return: A triplet of vertices (V), edges (E) and radius (R) arrays
+    """
+    V = np.load(folder+'/vertex_array.npy')
+    E = np.load(folder+'/edge_array.npy')
+    R = np.load(folder+'/vertex_radius_array.npy')
+
+    return V, E, R
+
+def save_skeleton_data(V,E,R, folder: str):
+    create_folders_if_not_exist(folder)
+    np.save(folder+'/vertex_array.npy', V)
+    np.save(folder+'/edge_array.npy', E)
+    np.save(folder+'/vertex_radius_array.npy', R)

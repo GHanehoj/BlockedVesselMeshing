@@ -3,7 +3,6 @@ import os
 sys.path.append(os.path.abspath('../'))
 import numpy as np
 import convolution as CONV
-from tools.contouring import contour
 import rainbow.math.quaternion as QUAT
 import tetgen
 import igl
@@ -54,7 +53,7 @@ def normalize(v):
 
 def gen_proto():
     grid = CONV.conv_surf(V_proto, E_proto, R_proto, 0.05)
-    v, t = contour(grid)
+    v, t = CONV.contour(grid)
     tgen = tetgen.TetGen(v, t)
     nodes, elems = tgen.tetrahedralize()
     return nodes, np.int64(elems)
