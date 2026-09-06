@@ -1,0 +1,14 @@
+numpy
+scipy
+meshio
+triangle
+pymeshfix
+pyvista
+tqdm
+tetgen
+igl
+polyscope
+seaborn
+pygel3d
+plyfile
+torch
