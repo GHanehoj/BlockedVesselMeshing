@@ -10,6 +10,8 @@ from tools.mesh_util import merge_tri_meshes, flatness
 from collections import namedtuple
 import subprocess
 import meshio
+import triangle as tr
+import pymeshfix
 EndSlice = namedtuple("EndSlice", ["end", "edge", "flow_data"])
 
 tet_tris = np.array([[0,1,2], [1,2,3], [0,2,3], [0,1,3]])
@@ -104,11 +106,6 @@ def process_end(mesh: TetMesh, flow_data: FlowData):
     end.clean()
     edge.clean()
 
-    # import pyvista as pv
-    # grid = pv.UnstructuredGrid({pv.CellType.TETRA: mesh.tets}, mesh.nodes)
-    # bodies = grid.split_bodies()
-    # assert(len(bodies) == 1)
-
     return EndSlice(end, edge, flow_data)
 
 def find_connectivity(tris):
@@ -163,16 +160,19 @@ def calc_normal_towards(tri, p):
     return normal
 
 def generate_cluster_mesh(cluster, res, uid):
+    # Normalize to avoid numerical instabilities
     centre = np.mean(cluster.V, axis=0)
     sz = 100/np.median(cluster.R)
 
     V = (cluster.V-centre)*sz
     E = cluster.E
-    R = cluster.R*0.65*sz
+    R = cluster.R*sz
     radii = ([cluster.in_data.radius] if cluster.in_data is not None else []) + [node.radius for node in cluster.nodes] + [outflow.data.radius for outflow in cluster.outflows]
     dx = ((2*np.min(radii))/res)*sz
 
-    grid = CONV.conv_surf(V, E, R, dx)
+    # grid = CONV.conv_surf(V, E, R, dx)
+    grid = CONV.conv_surf_SCALIS(V, E, R, dx)
+
     if grid.dim[0]*grid.dim[1]*grid.dim[2] > 250*250*250:
         raise Exception("grid too large")
     verts, tris = CONV.contour(grid)
@@ -242,9 +242,7 @@ def connector_tube(end1, end2, ang_res):
     r2 = end_radius(end2)
     l = np.linalg.norm(end1.flow_data.point - end2.flow_data.point)
     frac1 = min(0.1, (0.5*r1)/l)
-    # frac1 = min(0.2, (0.5*r1)/l)
     frac2 = 1-min(0.1, (0.5*r2)/l)
-    # frac2 = 1-min(0.2, (0.5*r2)/l)
     v_p = lerp(end1.flow_data.point, end2.flow_data.point, frac1)
     v_c = lerp(end1.flow_data.point, end2.flow_data.point, frac2)
     r_p = lerp(r1, r2, frac1)
@@ -302,8 +300,6 @@ def sort_ring_morph(points, lines):
         permutation = permutation[::-1]
     return points[permutation]
 
-import pyvista as pv
-# import triangle as tr
 def strip(end, cyl_edge, r):
     Q = QUAT.R_vector_to_vector(end.flow_data.dir, VEC.k())
     def transform(p):     return QUAT.rotate(Q, p-end.flow_data.point)
@@ -341,14 +337,6 @@ def strip(end, cyl_edge, r):
 
     n = len(cyl_projs2)
     end_to_cyl_map = np.full(len(end_projs2), np.nan)
-    def show_map():
-        plotter = pv.Plotter()
-        points = np.vstack((cyl_projs2, end_projs2))
-        points3d = np.hstack((points, np.zeros((len(points),1))))
-        plotter.add_point_labels(points3d, [str(i) for i in range(len(points3d))])
-        lines = np.array([[points3d[i+n], points3d[int(m)]] for i, m in enumerate(end_to_cyl_map) if np.isfinite(m)])
-        plotter.add_lines(lines.reshape(-1,3), color="b")
-        plotter.show()
     end_to_cyl_map[0] = 0
     end_to_cyl_map[-1] = len(cyl_projs2)-1
     for i in height_order:
@@ -402,7 +390,6 @@ def strip(end, cyl_edge, r):
             extra_tri_meshes.append(TriMesh(nodes, tris))
         else:
             try:
-                import triangle as tr
                 idxs = [unmapped_idxs[0]-1] + unmapped_idxs + [unmapped_idxs[len(unmapped_idxs)-1]+1]
                 t = tr.triangulate({'vertices': end_projs2[idxs]})
 
@@ -440,36 +427,21 @@ def strip(end, cyl_edge, r):
             for mapi in range(map_mid,map2):
                 tris.append([mapi, mapi+1, i+n+1])
     tris = np.array(tris)
-    # all_p = np.vstack((cyl_projs2, end_projs2[::-1,:]))
-    # lines = np.vstack((np.arange(all_p.shape[0]), np.roll(np.arange(all_p.shape[0]),-1))).T
-    # lines = np.concatenate(([all_p.shape[0]+1], np.arange(all_p.shape[0]), [0]))
-    # contour = pv.PolyData(all_p, faces=lines)
-    # flat_tris = contour.delaunay_2d(edge_source=contour)
-    # tris = tr.triangulate(dict(vertices=all_p, segments=lines), opts="p")['triangles']
-    # tris = flat_tris.faces.reshape(-1, 4)[:,1:]
     nodes = np.vstack((cyl_points, cyl_points[0], end_nodes[remaining_end_idxs]))
     nodes = transform_inv(nodes)
     strip_mesh = TriMesh(nodes, tris)
 
-    def show_tris():
-        plotter = pv.Plotter()
-        points = np.vstack((cyl_projs2, end_projs2))
-        points3d = np.hstack((points, np.zeros((len(points),1))))
-        plotter.add_point_labels(points3d, [str(i) for i in range(len(points3d))])
-        plotter.add_mesh(pv.PolyData(points3d, np.concatenate((np.full((tris.shape[0], 1), 3), tris), axis=1)), show_edges=True)
-        plotter.show()
-
     if len(extra_tri_meshes) > 0:
         strip_mesh = merge_tri_meshes([strip_mesh] + extra_tri_meshes)
     return strip_mesh
-import pymeshfix
+
 def make_connector(end1: EndSlice, end2: EndSlice, uid) -> TetMesh:
     edge_cnt = int(np.ceil((end1.edge.segs.shape[0]+end2.edge.segs.shape[0])/2))
 
     conn_mesh, conn_edge1, conn_edge2 = connector_tube(end1, end2, edge_cnt)
 
-    strip1 = strip(end1, conn_edge1, 0.95*end1.flow_data.radius)
-    strip2 = strip(end2, conn_edge2, 0.95*end2.flow_data.radius)
+    strip1 = strip(end1, conn_edge1, end1.flow_data.radius)
+    strip2 = strip(end2, conn_edge2, end2.flow_data.radius)
 
     connector_tri = merge_tri_meshes([end1.end, strip1, conn_mesh, strip2, end2.end])
 

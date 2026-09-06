@@ -53,6 +53,7 @@ def show_clusters(clusters):
         plotter.add_point_labels(cluster.nodes[0].position, [str(i)])
     plotter.show()
 
+
 def show_cluster_graph(cluster):
     show_graph(cluster.V, cluster.E, cluster.R)
 
@@ -71,6 +72,9 @@ def add_graph(plotter, V,E,R):
     points['R'] = R
     spheres = points.glyph(geom=pv.Sphere(radius=1.0), scale="R")
     plotter.add_mesh(spheres, opacity=0.5, color="b")
+
+def add_flow(plotter, flow_data):
+    plotter.add_arrows([flow_data.point], [flow_data.dir], [flow_data.radius])
 
 def show_seg_mesh(seg_mesh, color='black'):
     show_seg_meshes([seg_mesh], color)

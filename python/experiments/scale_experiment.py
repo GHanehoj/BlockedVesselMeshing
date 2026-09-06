@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.append(os.path.abspath('../'))
 sys.setrecursionlimit(10**6)
-import load as LOAD
+import tools.file as FILE
 import tree as TREE
 import clusters as CLUSTERS
 import full_generation as GEN
@@ -49,7 +49,7 @@ def run(V, E, R):
     t0 = time.time()
     root_cluster = CLUSTERS.make_cluster(root.children[0], done_f)
 
-    pbar = tqdm(total=CLUSTERS._cnt(root_cluster, 0, _MAX_DEPTH))
+    pbar = tqdm(total=CLUSTERS.count_nodes(root_cluster, 0, _MAX_DEPTH))
     def done_f(): pbar.update(1)
 
     multi_tet, fail_cnt = GEN.gen_tree_clustered(root_cluster, 10, done_f, _MAX_DEPTH)

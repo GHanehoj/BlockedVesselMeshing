@@ -22,6 +22,20 @@ def line_intersect2(p0,p1,q0,q1, eps):
     d[mask] = -d[mask]
     return np.logical_and.reduce((eps_less(0,u,eps), eps_less(0,v,eps), eps_less(u,d,eps), eps_less(v,d,eps)))
 
+def point_seg_intersect(pnt, start, end):
+    line = end-start
+    vec = pnt-start
+    l = np.linalg.norm(line)
+    dir = line/l
+    t = np.dot(dir, vec)/l
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    nearest = start + t*l*dir
+    dist = np.linalg.norm(nearest-pnt)
+    return (dist, t)
+
 def point_in_triangle2(a,b,c,p, eps):
     ac = c-a
     ab = b-a

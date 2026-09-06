@@ -5,7 +5,6 @@ Module for computing convolution surface grid using single threaded approach.
 from typing import Callable
 from numpy.typing import ArrayLike, NDArray
 import numpy as np
-import data as DATA
 
 class RenderData:
     """
@@ -33,15 +32,15 @@ class RenderData:
         self.D = self.B - self.A  # Edge direction vector for all edges in E
         self.L = np.linalg.norm(self.D, axis=1)  # Edge lengths for all edges in E
         self.U = self.D / self.L[:, np.newaxis]  # Unit direction vector for all edges in E
-        u, c = np.unique(E, return_counts=True)
-        endsA = np.isin(E[:,0], u[c==1])
-        endsB = np.isin(E[:,1], u[c==1])
-        self.A[endsA] = self.A[endsA] - 0.3*self.U[endsA] * R[E[endsA,0]][:,np.newaxis]
-        self.B[endsB] = self.B[endsB] - 0.3*self.U[endsB] * R[E[endsB,1]][:,np.newaxis]
-        self.D = self.B - self.A  # Edge direction vector for all edges in E
-        self.L = np.linalg.norm(self.D, axis=1)  # Edge lengths for all edges in E
+        # u, c = np.unique(E, return_counts=True)
+        # endsA = np.isin(E[:,0], u[c==1])
+        # endsB = np.isin(E[:,1], u[c==1])
+        # self.A[endsA] = self.A[endsA] - 0.3*self.U[endsA] * R[E[endsA,0]][:,np.newaxis]
+        # self.B[endsB] = self.B[endsB] - 0.3*self.U[endsB] * R[E[endsB,1]][:,np.newaxis]
+        # self.D = self.B - self.A  # Edge direction vector for all edges in E
+        # self.L = np.linalg.norm(self.D, axis=1)  # Edge lengths for all edges in E
         self.R = R  # vertex radius values
-        self.P = 2.0 * np.max(R[E], axis=1)  # Padding magnitude around each edge in E, AABBs need to be large enough to cover the iso-surface of the skeleton.
+        self.P = 4.0 * np.max(R[E], axis=1)  # Padding magnitude around each edge in E, AABBs need to be large enough to cover the iso-surface of the skeleton.
         self.P[self.P < 5.0 * dx] = 5.0 * dx
 
         self.min_corner = np.min(np.stack((self.A, self.B), axis=1), axis=1) - self.P[:, np.newaxis]  # Minimum corner for AABB around each edge of E
@@ -70,7 +69,7 @@ class Grid:
 
 def render_field(dx: float
                 , iso_value: float
-                , data: DATA.RenderData
+                , data: RenderData
                 , kernel: Callable[[ArrayLike, ArrayLike, float, float], ArrayLike]
                  ) -> Grid:
     """
@@ -144,4 +143,36 @@ def render_field(dx: float
         #
 
         values[(i_min-data.min[0]):(i_max-data.min[0]+1), (j_min-data.min[1]):(j_max-data.min[1]+1), (k_min-data.min[2]):(k_max-data.min[2]+1)] -= potential
+    return Grid(values, dx, data.min)
+
+
+from python.SCALIS_numint import get_integral_at_point
+def render_field_SCALIS(dx: float
+                      , iso_value: float
+                      , data: RenderData
+                      , sigma : float
+                       ) -> Grid:
+    """
+    Compute potential energy field of skeleton.
+
+    :param dx:        The desired grid cell size to use.
+    :param data:      A data structure that contains skeleton information.
+    :param kernel:    A kernel function that we will use to for computing a convolution with the skeleton.
+    :param verbose:   A boolean flag to toggle output on screen.
+    :return:          A tuple with the computed grid, and a timings-array, where each entry holds the duration for
+                      processing one edge in the skeleton.
+    """
+    values = np.full(data.dim, iso_value)
+
+    for idx in range(data.K):
+        a = data.A[idx]  # Starting point of edge
+        b = data.B[idx]  # Ending point of edge
+        r0 = data.R[data.E[idx, 0]]  # Radius of starting vertex
+        r1 = data.R[data.E[idx, 1]]  # Radius of ending vertex
+
+        for i in range(data.min[0], data.max[0]+1):
+            for j in range(data.min[1], data.max[1]+1):
+                for k in range(data.min[2], data.max[2]+1):
+                    values[i-data.min[0],j-data.min[1],k-data.min[2]] -= get_integral_at_point(a, r0, b, r1, np.array([i*dx, j*dx, k*dx]), sigma)
+
     return Grid(values, dx, data.min)

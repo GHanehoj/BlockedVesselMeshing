@@ -77,7 +77,7 @@ huge = np.where(stats[:,0] > 100000)[0]
 if len(huge) > 0:
     print("Huge clusters found:", huge)
 
-pbar = tqdm(total=CLUSTERS._cnt(root_cluster, 0, _MAX_DEPTH))
+pbar = tqdm(total=CLUSTERS.count_nodes(root_cluster, 0, _MAX_DEPTH))
 def done_f(): pbar.update(1)
 
 multi_tet, fail_cnt = GEN.gen_tree_clustered(root_cluster, res, done_f, _MAX_DEPTH, experiment)
